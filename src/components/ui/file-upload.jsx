@@ -63,6 +63,7 @@ export const FileUpload = ({
           className="hidden" />
         <div
           className="absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]">
+
         </div>
         <div className="flex flex-col items-center justify-center">
           <p

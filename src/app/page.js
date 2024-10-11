@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import GraphComponent from '../components/GraphComponent'; 
+import GraphComponent from '../components/GraphComponent';
 import { BackgroundLines } from "@/components/ui/background-lines";
 import { FileUpload } from "../components/ui/file-upload";
 const Page = () => {
