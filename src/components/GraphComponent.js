@@ -18,26 +18,27 @@ const GraphComponent= () => {
         {
           selector: 'node',
           style: {
-            'background-image': function(ele) {
-              // Use icons as background images
+            'background-image': function (ele) {
               const deviceType = ele.data('type');
               if (deviceType === 'IT') return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`;
               if (deviceType === 'OT') return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaServer />))}`;
-              return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`;  // Default icon
+              return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`;
             },
             'background-fit': 'cover',
             'background-opacity': 0.9,
+            
+            // Label Text and Styling
             'label': function(ele) {
               const vendor = ele.data('vendor');
-              return `${ele.data('label')} (${vendor})`;
+              return `${ele.data('label')} (${vendor})`;  // Text content of the label
             },
-            'font-size': '10px',
+            'color': '#0047AB',  // Set the label text color
+            'font-size': '12px',
             'text-valign': 'center',
-            'text-halign': 'center',
-            'width': '40px',  // Adjust size of the node to fit the icon
-            'height': '40px',
+            'width': '50px',
+            'height': '50px',
             'border-width': 2,
-            'border-color': '#ccc'
+            'border-color': '#ccc',
           }
         },
         {

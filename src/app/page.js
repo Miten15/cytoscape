@@ -15,6 +15,8 @@ const Page = () => {
       Network Graph Uploader
       </h2>
       <FileUpload onChange={setNetworkData} />  {/* Pass setNetworkData to FileUpload */}
+      {/* Conditionally render GraphComponent based on networkData */}
+      <div className='pt-10'>
         {networkData ? (
           <GraphComponent networkData={networkData} />
         ) : (
@@ -22,6 +24,7 @@ const Page = () => {
             Please upload a valid JSON file to display the graph.
           </p>
         )}
+        </div>
     </BackgroundLines>
     </div>
   );
