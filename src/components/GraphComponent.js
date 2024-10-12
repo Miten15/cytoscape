@@ -77,11 +77,11 @@ const GraphComponent = ({ data }) => {
           return node.data('cluster'); // Ensure cluster info is provided
         },
         animate: false, // Disable animation to reduce jitter
-        padding: 10,
+        padding: 50, // Increase padding around the graph
         allowNodesInsideCircle: true,
-        nodeRepulsion: 4500,
-        idealInterClusterEdgeLengthCoefficient: 1.8,
-        nodeSeparation: 12.5,
+        nodeRepulsion: 8000, // Increase node repulsion to space out nodes more
+        idealInterClusterEdgeLengthCoefficient: 2.5, // Increase the distance between clusters
+        nodeSeparation: 20, // Increase node separation for more space between nodes
         refresh: 10,
         fit: true,
         nodeDimensionsIncludeLabels: true,
