@@ -1,43 +1,43 @@
-"use client";  // Necessary for using client-side hooks like useEffect
+"use client";
 
 import React, { useEffect } from 'react';
 import cytoscape from 'cytoscape';
 import cise from 'cytoscape-cise';
-import ReactDOMServer from 'react-dom/server';  // This allows us to render React components to strings
-import networkData from '../data/networkgraph.json';  // Assuming the JSON data is in this file
+import networkData from '../data/networkgraph.json'; // Your JSON data
 
-import { FaDesktop, FaServer } from 'react-icons/fa';
-
-cytoscape.use(cise);  // Use the CiSE plugin
+cytoscape.use(cise); // Use CiSE layout
 
 const GraphComponent = ({ data }) => {
   useEffect(() => {
-    const elements = createCytoscapeData(data || networkData);  // Pass the user-provided data
+    const container = document.getElementById('cy');
 
+    // Check if the container exists to avoid the "notify" error
+    if (!container) {
+      console.error("Cytoscape container not found");
+      return;
+    }
+
+    const elements = createCytoscapeData(data || networkData);
+
+    // Initialize Cytoscape only if the container is not null
     const cy = cytoscape({
-      container: document.getElementById('cy'),
-      elements: elements,
+      container, // Pass the container directly
+      elements,
       style: [
         {
           selector: 'node',
           style: {
-            'background-image': function (ele) {
-              const deviceType = ele.data('type');
-              if (deviceType === 'IT') {
-                return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`;
-              }
-              if (deviceType === 'OT') {
-                return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaServer />))}`;
-              }
-              return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`;
+            'background-color': function (ele) {
+              const type = ele.data('type');
+              if (type === 'IT') return '#3498db'; // Blue
+              if (type === 'OT') return '#e74c3c'; // Red
+              if (type === 'Network') return '#2ecc71'; // Green
+              return '#bdc3c7'; // Default gray
             },
-            'background-fit': 'cover',
-            'background-opacity': 0.9,
             'label': function (ele) {
-              const vendor = ele.data('vendor');
-              return `${ele.data('label')} (${vendor})`;  // Text content of the label
+              return `${ele.data('label')} (${ele.data('vendor') || ''})`; // Add vendor info
             },
-            'color': '#0047AB',  // Set the label text color
+            'color': '#0047AB', // Label text color
             'font-size': '12px',
             'text-valign': 'center',
             'width': '50px',
@@ -60,27 +60,25 @@ const GraphComponent = ({ data }) => {
       layout: {
         name: 'cise',
         clusters: function (node) {
-          return node.data('cluster');  // Ensure cluster info is provided
+          return node.data('cluster'); // Ensure cluster info is provided
         },
-        animate: true,
-        animationDuration: 500,  // Adjust the animation duration for a smoother layout
+        animate: false, // Disable animation to reduce jitter
+        animationDuration: 0, // Set duration to 0 if you want to fully disable it
         padding: 10,
         allowNodesInsideCircle: true,
         nodeRepulsion: 4500,
-        idealInterClusterEdgeLengthCoefficient: 1.8,  // Adjusted to prevent overlap
+        idealInterClusterEdgeLengthCoefficient: 1.8,
         nodeSeparation: 12.5,
         refresh: 10,
         fit: true,
         nodeDimensionsIncludeLabels: true,
-        // Setting maxIterations to prevent endless loops
-        maxIterations: 1000,  // Limit the number of iterations to stop endless movement
-        refreshIterations: 50,  // Refresh the layout every 50 iterations
+        maxIterations: 1000, // Limit iterations
+        refreshIterations: 50,
       },
     });
 
     cy.on('layoutstop', () => {
       console.log('Layout has finished');
-      // Stop animation or layout when done
     });
 
   }, [data]);
@@ -92,53 +90,104 @@ const GraphComponent = ({ data }) => {
   );
 };
 
-// Function to render React icon component to an SVG string
-const renderIcon = (icon) => {
-  return ReactDOMServer.renderToStaticMarkup(icon);
-};
-
-// Function to transform the user data into Cytoscape elements
+// Helper function to process the data into Cytoscape elements
 const createCytoscapeData = (data) => {
   const elements = [];
+  
+  // Cluster identifiers for each type
+  const clusters = {
+    IT: 'IT_Cluster',
+    OT: 'OT_Cluster',
+    Network: 'Network_Cluster',
+  };
 
-  if (Array.isArray(data) && data.length > 0 && data[0].mac_data) {
-    const macData = data[0].mac_data;
-
-    macData.forEach((category) => {
-      Object.keys(category).forEach((deviceType) => {
-        category[deviceType].forEach((device) => {
-          const macAddress = device.MAC;
-          const vendor = device.Vendor;
-          const status = device.Status;
-          const cluster = device.Cluster || 'default_cluster';  // Add clustering info
-
-          if (macAddress && device[macAddress]) {
-            const mainNode = { 
-              data: { id: macAddress, label: macAddress, type: deviceType.includes('OT') ? 'OT' : (deviceType.includes('IT') ? 'IT' : 'Other'), vendor, status, cluster }
-            };
-            elements.push(mainNode);
-
-            device[macAddress].forEach((connectedMac) => {
-              const protocol = device.Protocol || 'unknown';
-              const connectedNode = { 
-                data: { id: connectedMac, label: connectedMac, type: 'unknown', cluster }  // Ensure cluster info is passed
-              };
-              elements.push(connectedNode);
-
-              const edge = { 
-                data: { source: macAddress, target: connectedMac, protocol }
-              };
-              elements.push(edge);
-            });
-          }
-        });
-      });
-    });
-  } else {
-    console.error("Data does not contain the expected structure or MAC addresses.");
+  if (!Array.isArray(data) || !data.length || !data[0].mac_data) {
+    console.error("Data does not contain the expected structure.");
+    return elements; // Return empty elements if data is invalid
   }
 
+  const macData = data[0].mac_data;
+  const nodeIds = new Set(); // Track existing node IDs for edge checking
+
+  // Create main clusters
+  Object.keys(clusters).forEach(type => {
+    elements.push({
+      data: {
+        id: clusters[type],
+        label: type,
+        type: type,
+        cluster: type
+      },
+    });
+  });
+
+  macData.forEach((category) => {
+    Object.keys(category).forEach((deviceType) => {
+      category[deviceType].forEach((device) => {
+        const macAddress = device.MAC;
+        const vendor = device.Vendor;
+        const cluster = deviceType.includes('OT') ? 'OT' : (deviceType.includes('IT') ? 'IT' : 'Network'); // Assign cluster based on type
+
+        // Add node to elements and track its ID
+        nodeIds.add(macAddress); // Store valid node IDs for edge verification
+        elements.push({
+          data: {
+            id: macAddress,
+            label: macAddress,
+            type: cluster,
+            vendor,
+            cluster: cluster,
+          },
+        });
+
+        // Connect devices to their respective cluster
+        elements.push({
+          data: {
+            source: macAddress,
+            target: clusters[cluster], // Connect to the respective cluster
+          },
+        });
+
+        // Add edges for connections only to other nodes in the same cluster
+        if (device[macAddress] && Array.isArray(device[macAddress])) {
+          device[macAddress].forEach((connectedMac) => {
+            if (
+              connectedMac !== '00:00:00:00:00:00' &&
+              nodeIds.has(connectedMac) &&
+              cluster === getClusterByMac(connectedMac, elements) // Check if the connected node belongs to the same cluster
+            ) {
+              elements.push({
+                data: { source: macAddress, target: connectedMac }
+              });
+            }
+          });
+        }
+      });
+    });
+  });
+
+  // Create one line of connections between clusters
+  elements.push({
+    data: {
+      source: clusters['IT'],
+      target: clusters['OT'],
+    },
+  });
+
+  elements.push({
+    data: {
+      source: clusters['OT'],
+      target: clusters['Network'],
+    },
+  });
+
   return elements;
+};
+
+// Helper function to determine the cluster of a MAC address
+const getClusterByMac = (macAddress, elements) => {
+  const node = elements.find(e => e.data && e.data.id === macAddress);
+  return node ? node.data.cluster : null;
 };
 
 export default GraphComponent;
