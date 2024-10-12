@@ -1,9 +1,10 @@
-"use client";
-
+'use client';
+import ReactDOMServer from 'react-dom/server';
 import React, { useEffect } from 'react';
 import cytoscape from 'cytoscape';
 import cise from 'cytoscape-cise';
 import networkData from '../data/networkgraph.json'; // Your JSON data
+import { FaDesktop, FaNetworkWired } from 'react-icons/fa';
 
 cytoscape.use(cise); // Use CiSE layout
 
@@ -19,38 +20,51 @@ const GraphComponent = ({ data }) => {
 
     const elements = createCytoscapeData(data || networkData);
 
-    // Initialize Cytoscape only if the container is not null
+    // Initialize Cytoscape with proper layout and style
     const cy = cytoscape({
-      container, // Pass the container directly
+      container,
       elements,
       style: [
         {
           selector: 'node',
           style: {
-            'background-color': function (ele) {
+            'background-image': function(ele) {
               const type = ele.data('type');
-              if (type === 'IT') return '#3498db'; // Blue
-              if (type === 'OT') return '#e74c3c'; // Red
-              if (type === 'Network') return '#2ecc71'; // Green
+              if (type === 'IT') {
+                return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaDesktop />))}`; // Desktop icon for IT
+              }
+              if (type === 'OT') {
+                return  iconOT;
+              }
+              if (type === 'Network') {
+                return `data:image/svg+xml,${encodeURIComponent(renderIcon(<FaNetworkWired />))}`; // Router icon for Network
+              }
               return '#bdc3c7'; // Default gray
             },
-            'label': function (ele) {
-              return `${ele.data('label')} (${ele.data('vendor') || ''})`; // Add vendor info
+            'background-fit': 'contain', // Changed to contain for better fit
+            'background-opacity': 1,
+            'label': function(ele) {
+              return `${ele.data('vendor') || ''}`; // Show only vendor name as the label
             },
             'color': '#0047AB', // Label text color
             'font-size': '12px',
             'text-valign': 'center',
-            'width': '50px',
-            'height': '50px',
+            'text-halign': 'center',
+            'width': '60px',
+            'height': '60px',
             'border-width': 2,
-            'border-color': '#ccc',
+            'background-color': function(ele) {
+              const type = ele.data('type');
+              // Color borders based on type
+              return type === 'IT' ? '#3498db' : type === 'OT' ? '#e67e22' : '#2ecc71';
+            },
           },
         },
         {
           selector: 'edge',
           style: {
             'width': 2,
-            'line-color': '#ccc',
+            'line-color':  '#ccc',
             'target-arrow-color': '#ccc',
             'target-arrow-shape': 'triangle',
             'curve-style': 'bezier',
@@ -59,11 +73,10 @@ const GraphComponent = ({ data }) => {
       ],
       layout: {
         name: 'cise',
-        clusters: function (node) {
+        clusters: function(node) {
           return node.data('cluster'); // Ensure cluster info is provided
         },
         animate: false, // Disable animation to reduce jitter
-        animationDuration: 0, // Set duration to 0 if you want to fully disable it
         padding: 10,
         allowNodesInsideCircle: true,
         nodeRepulsion: 4500,
@@ -81,6 +94,20 @@ const GraphComponent = ({ data }) => {
       console.log('Layout has finished');
     });
 
+    // Tap event to display node details
+    cy.on('tap', 'node', (event) => {
+      const node = event.target;
+      const nodeData = node.data();
+
+      alert(`\
+        MAC Address: ${nodeData.id}\
+        Vendor: ${nodeData.vendor}\
+        Type: ${nodeData.type}\
+        IP: ${nodeData.ip || 'N/A'}\
+        Protocols: ${nodeData.protocols || 'N/A'}\
+      `);
+    });
+
   }, [data]);
 
   return (
@@ -90,10 +117,15 @@ const GraphComponent = ({ data }) => {
   );
 };
 
+// Helper function to render React icons as SVG strings
+const renderIcon = (icon) => {
+  return ReactDOMServer.renderToStaticMarkup(icon);
+};
+
 // Helper function to process the data into Cytoscape elements
 const createCytoscapeData = (data) => {
   const elements = [];
-  
+
   // Cluster identifiers for each type
   const clusters = {
     IT: 'IT_Cluster',
@@ -133,10 +165,12 @@ const createCytoscapeData = (data) => {
         elements.push({
           data: {
             id: macAddress,
-            label: macAddress,
+            label: macAddress,  // Label is vendor-only in the visual, but we keep MAC in the data
             type: cluster,
             vendor,
             cluster: cluster,
+            ip: device.IP,  // Store IP in node data
+            protocols: device.Protocol ? device.Protocol.join(', ') : 'N/A'  // Store Protocols
           },
         });
 
@@ -190,4 +224,7 @@ const getClusterByMac = (macAddress, elements) => {
   return node ? node.data.cluster : null;
 };
 
+// Placeholder for OT icon (base64 or URL can be added here)
+//const iconOT = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTAiIGhlaWdodD0iNTAiPjxwYXRo...';
+const iconOT = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cGF0aCBkPSJNMzg0IDMyMEgyNTZjLTE3LjY3IDAtMzIgMTQuMzMtMzIgMzJ2MTI4YzAgMTcuNjcgMTQuMzMgMzIgMzIgMzJoMTI4YzE3LjY3IDAgMzItMTQuMzMgMzItMzJWMzUyYzAtMTcuNjctMTQuMzMtMzItMzItMzJ6TTQ5NiA2NGgtMTI4Yy0xNy42NyAwLTMyIDE0LjMzLTMyIDMydjEyOGMwIDE3LjY3IDE0LjMzIDMyIDMyIDMyaDEyOGMxNy42NyAwIDMyLTE0LjMzIDMyLTMyVjk2YzAtMTcuNjctMTQuMzMtMzItMzItMzJ6TTE0NCAzMjBIMTZjLTE3LjY3IDAtMzIgMTQuMzMtMzIgMzJ2MTI4YzAgMTcuNjcgMTQuMzMgMzIgMzIgMzJoMTI4YzE3LjY3IDAgMzItMTQuMzMgMzItMzJWMzUyYzAtMTcuNjctMTQuMzMtMzItMzItMzJ6TTM4NCA2NEgyNTZjLTE3LjY3IDAtMzIgMTQuMzMtMzIgMzJ2MTI4YzAgMTcuNjcgMTQuMzMgMzIgMzIgMzJoMTI4YzE3LjY3IDAgMzItMTQuMzMgMzItMzJWOTZjMC0xNy42Ny0xNC4zMy0zMi0zMi0zMnpNMTQ0IDY0SDE2QzguODIgNjQgMi45NCA2OS43OCAwIDc3LjY1VjI0MGMwIDE3LjY3IDE0LjMzIDMyIDMyIDMyaDEyOGMxNy42NyAwIDMyLTE0LjMzIDMyLTMyVjk2YzAtMTcuNjctMTQuMzMtMzItMzItMzJ6Ii8+PC9zdmc+';
 export default GraphComponent;
