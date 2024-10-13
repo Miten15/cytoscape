@@ -32,10 +32,27 @@ export const FileUpload = ({
   const fileInputRef = useRef(null);
 
   const handleFileChange = (newFiles) => {
-    setFiles((prevFiles) => [...prevFiles, ...newFiles]);
-    onChange && onChange(newFiles);
+    const file = newFiles[0]; // We only allow one file, so we access the first one
+    if (file) {
+      const reader = new FileReader();
+  
+      reader.onload = (event) => {
+        try {
+          const fileContent = event.target.result; // File content
+          const parsedData = JSON.parse(fileContent); // Parse JSON
+  
+          console.log('Parsed Data:', parsedData); // Check if data is correctly parsed
+          onChange(parsedData); // Pass the parsed data to the parent component
+        } catch (error) {
+          console.error('Error parsing JSON:', error);
+          alert('Invalid JSON file. Please upload a valid file.');
+        }
+      };
+  
+      reader.readAsText(file); // Read the file as text
+    }
   };
-
+  
   const handleClick = () => {
     fileInputRef.current?.click();
   };
