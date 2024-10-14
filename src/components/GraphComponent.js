@@ -52,7 +52,7 @@ const GraphComponent = ({ data }) => {
             },
             'text-wrap': 'wrap',
             'text-max-width': '70px',
-            'color': '#0047AB', // Label text color
+            'color': '#FFFFFF', // Label text color
             'font-size': '12px',
             'text-valign': 'top', // Cluster labels will appear on top
             'text-halign': 'center',
@@ -79,20 +79,25 @@ const GraphComponent = ({ data }) => {
       layout: {
         name: 'cise',
         clusters: function (node) {
-          return node.data('cluster'); // Ensure cluster info is provided
+          return node.data('cluster');  // Assigns nodes to a cluster based on your data
         },
-        animate: false, // Disable animation to reduce jitter
-        padding: 100, // Increased padding around the graph
-        allowNodesInsideCircle: true,
-        nodeRepulsion: 12000, // Further increased node repulsion for more space
-        idealInterClusterEdgeLengthCoefficient: 2.5, // Increase the distance between clusters
-        nodeSeparation: 50, // Further increased node separation for more space between nodes
-        refresh: 10,
+        animate: false,
+        padding: 250,
+        allowNodesInsideCircle: false, // This forces nodes to stay outside the center of the cluster circle
+        nodeRepulsion: 4500,           // High repulsion to space nodes apart in a circular fashion
+        idealInterClusterEdgeLengthCoefficient: 5.0,  // Spreads out clusters
+        nodeSeparation: 150,           // Helps space out nodes within the cluster more circularly
+        refresh: 20,
+        edgeLength: 1000,  // Increase this for more
         fit: true,
         nodeDimensionsIncludeLabels: true,
-        maxIterations: 1000, // Limit iterations
+        maxIterations: 2000,
         refreshIterations: 50,
-      },
+        gravityRangeCompound: 5.5,     // Increase to form tighter circular clusters
+        gravityCompound: 10.          // Strong gravity for tightly connected circular clusters
+      }
+      
+      
     });
 
     cy.on('layoutstop', () => {
@@ -116,9 +121,9 @@ const GraphComponent = ({ data }) => {
   }, [data]);
 
   return (
-    <div style={{ height: '100vh', width: '100vw' }}>
-      <div id="cy" style={{ height: '100%', width: '100%' }}></div>
-    </div>
+    <div style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div id="cy" style={{ height: '100%', width: '100%' }}></div>
+  </div>  
   );
 };
 
@@ -211,6 +216,10 @@ const createCytoscapeData = (data) => {
     data: {
       source: clusters['IT'],
       target: clusters['OT'],
+      nodeSeparation: 1000,           // Helps space out nodes within the cluster more circularly
+      edgeLength: 1000,
+      padding: 10000,                   // Padding between clusters
+
     },
   });
 
@@ -218,6 +227,8 @@ const createCytoscapeData = (data) => {
     data: {
       source: clusters['OT'],
       target: clusters['Network'],
+      nodeSeparation: 269,           // Helps space out nodes within the cluster more circularly
+      edgeLength: 100,               // Length of the edge between clusters
     },
   });
 
