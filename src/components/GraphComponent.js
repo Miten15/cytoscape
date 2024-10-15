@@ -118,6 +118,34 @@ const GraphComponent = ({ data }) => {
       `);
     });
 
+    cy.on('mouseover', 'edge', (event) => {
+      const edge = event.target;
+      const sourceNode = cy.getElementById(edge.source().id());
+      const targetNode = cy.getElementById(edge.target().id());
+
+      const sourceData = sourceNode.data();
+      const targetData = targetNode.data();
+
+      const message = `
+        Source:
+        MAC: ${sourceData.id}
+        IP: ${sourceData.ip || 'N/A'}
+
+        Target:
+        MAC: ${targetData.id}
+        IP: ${targetData.ip || 'N/A'}
+      `;
+
+      // Display the message in an alert or tooltip
+      alert(message);
+    });
+
+    // Optionally, you can add 'mouseout' event to remove the tooltip when hovering out
+    cy.on('mouseout', 'edge', (event) => {
+      // You can hide the tooltip or alert here
+      console.log('Mouse out of edge');
+    });
+
   }, [data]);
 
   return (
