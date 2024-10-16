@@ -123,7 +123,7 @@ const GraphComponent = ({ data }) => {
     });
 
     // Mouseover event for edges to display IP and MAC addresses
-    cy.on('mouseover', 'edge', (event) => {
+    cy.on('tap', 'edge', (event) => {
       const edge = event.target; // Get the edge that triggered the event
       const sourceNode = cy.getElementById(edge.source().id()); // Get the source node
       const targetNode = cy.getElementById(edge.target().id()); // Get the target node
