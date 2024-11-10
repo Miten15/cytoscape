@@ -112,11 +112,11 @@ const GraphComponent = ({ data }) => {
     d3.selectAll('.graph-tooltip').remove();
     d3.selectAll('.link-tooltip').remove();
     
-    // Create node tooltip with absolute positioning
+    // Create node tooltip with enhanced positioning and animation
     const tooltipContainer = d3.select('body')
       .append('div')
       .attr('class', 'graph-tooltip')
-      .style('position', 'absolute') // Changed from fixed to absolute
+      .style('position', 'absolute')
       .style('background-color', 'rgba(0, 0, 0, 0.9)')
       .style('color', 'white')
       .style('padding', '12px')
@@ -128,13 +128,14 @@ const GraphComponent = ({ data }) => {
       .style('z-index', 9999)
       .style('max-width', '300px')
       .style('box-shadow', '0 4px 8px rgba(0, 0, 0, 0.2)')
-      .style('transition', 'opacity 0.1s ease-in-out');
+      .style('transform', 'translate(-50%, -100%)')
+      .style('transition', 'all 0.2s ease-out');
 
-    // Create link tooltip with absolute positioning
+    // Create link tooltip with smooth animation
     const linkTooltip = d3.select('body')
       .append('div')
       .attr('class', 'link-tooltip')
-      .style('position', 'absolute') // Changed from fixed to absolute
+      .style('position', 'absolute')
       .style('background-color', 'rgba(0, 0, 0, 0.9)')
       .style('color', 'white')
       .style('padding', '8px')
@@ -142,7 +143,8 @@ const GraphComponent = ({ data }) => {
       .style('font-size', '12px')
       .style('pointer-events', 'none')
       .style('opacity', 0)
-      .style('z-index', 9999);
+      .style('z-index', 9999)
+      .style('transition', 'all 0.2s ease-out');
 
     // Clear existing SVG content
     const svg = d3.select(svgRef.current)
@@ -294,7 +296,7 @@ nodeGroup.each(function(d) {
       .style('pointer-events', 'none')
       .text(d => d.id.includes('Cluster') ? d.label : d.Vendor);
 
-    // Enhanced tooltip behavior
+    // Enhanced tooltip behavior with smooth positioning
     const showTooltip = (event, d) => {
       if (!d.id.includes('Cluster')) {
         const content = `
@@ -308,53 +310,71 @@ nodeGroup.each(function(d) {
           </div>
         `;
 
-        // Get SVG bounds and mouse position relative to the SVG
+        // Get SVG and node position
         const bounds = svg.node().getBoundingClientRect();
-        const mouseX = event.pageX - bounds.left;
-        const mouseY = event.pageY - bounds.top;
-
-        // Calculate tooltip position
-        const tooltipWidth = 300;
-        const tooltipHeight = 200;
+        const matrix = event.currentTarget.getScreenCTM()
+          .translate(event.currentTarget.getAttribute('cx') || 0, 
+                    event.currentTarget.getAttribute('cy') || 0);
         
-        let leftPos = mouseX + 15;
-        let topPos = mouseY;
+        // Calculate position relative to the node
+        const nodeX = (matrix.e - bounds.left);
+        const nodeY = (matrix.f - bounds.top);
 
-        // Adjust position if tooltip would go off screen
-        if (leftPos + tooltipWidth > bounds.width) {
-          leftPos = mouseX - tooltipWidth - 15;
-        }
-        if (topPos + tooltipHeight > bounds.height) {
-          topPos = mouseY - tooltipHeight;
-        }
-
+        // Position tooltip with smooth transition
         tooltipContainer
           .html(content)
-          .style('left', `${leftPos}px`)
-          .style('top', `${topPos}px`)
-          .style('opacity', 1);
+          .style('left', `${nodeX}px`)
+          .style('top', `${nodeY - 10}px`) // Position slightly above the node
+          .style('transform', 'translate(-50%, -100%)')
+          .transition()
+          .duration(200)
+          .style('opacity', 1)
+          .style('top', `${nodeY - 20}px`); // Final position with slight upward movement
 
         // Highlight the node
         d3.select(event.currentTarget.parentNode)
           .select('circle:not([fill="transparent"])')
+          .transition()
+          .duration(200)
           .attr('r', 10)
           .attr('stroke-width', 2);
       }
     };
 
     const hideTooltip = (event) => {
-      tooltipContainer.style('opacity', 0);
+      tooltipContainer
+        .transition()
+        .duration(200)
+        .style('opacity', 0)
+        .style('top', d => `${parseFloat(d3.select(event.currentTarget).style('top')) - 10}px`);
+
       d3.select(event.currentTarget.parentNode)
         .select('circle:not([fill="transparent"])')
+        .transition()
+        .duration(200)
         .attr('r', d => d.id.includes('Cluster') ? 20 : 8)
         .attr('stroke-width', 1.5);
     };
 
-    // Add hover behavior to hit area
+    // Update mousemove handler for smooth tooltip following
     nodeHitArea
       .on('mouseover', showTooltip)
       .on('mouseout', hideTooltip)
-      .on('mousemove', showTooltip);
+      .on('mousemove', (event, d) => {
+        if (!d.id.includes('Cluster')) {
+          const bounds = svg.node().getBoundingClientRect();
+          const matrix = event.currentTarget.getScreenCTM()
+            .translate(event.currentTarget.getAttribute('cx') || 0, 
+                      event.currentTarget.getAttribute('cy') || 0);
+          
+          const nodeX = (matrix.e - bounds.left);
+          const nodeY = (matrix.f - bounds.top);
+
+          tooltipContainer
+            .style('left', `${nodeX}px`)
+            .style('top', `${nodeY - 20}px`);
+        }
+      });
 
     // Curved links function
     function linkArc(d) {
