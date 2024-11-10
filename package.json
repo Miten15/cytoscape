@@ -19,6 +19,7 @@
     "d3": "^7.9.0",
     "framer-motion": "^11.11.7",
     "jquery": "^3.7.1",
+    "lucide-react": "^0.456.0",
     "next": "14.2.15",
     "react": "^18",
     "react-cytoscapejs": "^2.0.0",
