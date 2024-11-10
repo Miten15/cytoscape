@@ -358,6 +358,7 @@ const labels = nodeGroup
         .attr('r', d => d.id.includes('Cluster') ? 20 : 8)
         .attr('stroke-width', 1.5);
     };
+    
 
     // Update mousemove handler for smooth tooltip following
     nodeHitArea
