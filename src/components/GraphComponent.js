@@ -236,112 +236,117 @@ const GraphComponent = ({ data }) => {
           .attr('stroke-width', d => d.source.id?.includes('Cluster') && d.target.id?.includes('Cluster') ? 2 : 1);
       });
 
-    // Draw nodes
+    // Draw nodes with improved hit detection
     const nodeGroup = container.append('g')
       .selectAll('g')
       .data(nodes)
-      .join('g');
+      .join('g')
+      .style('cursor', 'pointer'); // Add pointer cursor to indicate interactivity
 
-    // Add invisible larger circle for better hover detection
+    // Add hit area first (will be at the bottom of the stack)
     const nodeHitArea = nodeGroup
       .append('circle')
       .attr('r', d => d.id.includes('Cluster') ? 25 : 12)
       .attr('fill', 'transparent')
-      .style('pointer-events', 'all');
+      .style('pointer-events', 'all')
+      .style('cursor', 'pointer');
 
-    // Add visible circles for nodes
+    // Add visible node circle above hit area
     const node = nodeGroup
       .append('circle')
       .attr('r', d => d.id.includes('Cluster') ? 20 : 8)
       .attr('fill', d => clusters[d.type]?.color || 'gray')
       .attr('stroke', d => d.status === 'true' ? '#00ff00' : '#ff0000')
-      .attr('stroke-width', 1.5);
+      .attr('stroke-width', 1.5)
+      .style('pointer-events', 'none'); // Disable pointer events on visible circle
 
-    // Add icons for cluster nodes
-nodeGroup.each(function(d) {
-  if (d.id.includes('Cluster')) {
-    const IconComponent = clusters[d.id.split('_')[0]]?.icon;
-    if (IconComponent) {
-      const foreignObject = d3.select(this)
-        .append('foreignObject')
-        .attr('width', 24)
-        .attr('height', 24)
-        .attr('x', -12)
-        .attr('y', -12);
+    // Add icons for cluster nodes with pointer-events disabled
+    nodeGroup.each(function(d) {
+      if (d.id.includes('Cluster')) {
+        const IconComponent = clusters[d.id.split('_')[0]]?.icon;
+        if (IconComponent) {
+          const foreignObject = d3.select(this)
+            .append('foreignObject')
+            .attr('width', 24)
+            .attr('height', 24)
+            .attr('x', -12)
+            .attr('y', -12)
+            .style('pointer-events', 'none'); // Disable pointer events on icons
 
-      const div = foreignObject
-        .append('xhtml:div')
-        .style('width', '100%')
-        .style('height', '100%')
-        .style('display', 'flex')
-        .style('align-items', 'center')
-        .style('justify-content', 'center');
+          const div = foreignObject
+            .append('xhtml:div')
+            .style('width', '100%')
+            .style('height', '100%')
+            .style('display', 'flex')
+            .style('align-items', 'center')
+            .style('justify-content', 'center')
+            .style('pointer-events', 'none'); // Disable pointer events on icon container
 
-      const icon = document.createElement('div');
-      icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
-        <IconComponent width={16} height={16} stroke="white" strokeWidth={2} />
-      );
-      div.node().appendChild(icon.firstChild);
-    }
-  }
-});
-
-    // Add labels
-    const labels = nodeGroup
-      .append('text')
-      .attr('dy', d => d.id.includes('Cluster') ? -30 : -15)
-      .attr('text-anchor', 'middle')
-      .attr('fill', 'white')
-      .attr('font-size', '12px')
-      .style('pointer-events', 'none')
-      .text(d => d.id.includes('Cluster') ? d.label : d.Vendor);
-
-    // Enhanced tooltip behavior with smooth positioning
-    const showTooltip = (event, d) => {
-      if (!d.id.includes('Cluster')) {
-        const content = `
-          <div style="min-width: 200px;">
-            <strong>MAC:</strong> ${d.MAC}<br>
-            <strong>IP:</strong> ${d.IP || 'N/A'}<br>
-            <strong>Vendor:</strong> ${d.Vendor || 'Unknown'}<br>
-            <strong>Type:</strong> ${d.type}<br>
-            <strong>Status:</strong> ${d.status === 'true' ? 'Active' : 'Inactive'}<br>
-            ${d.connections ? `<strong>Connected to:</strong> ${d.connections.join(', ')}` : ''}
-          </div>
-        `;
-
-        // Get SVG and node position
-        const bounds = svg.node().getBoundingClientRect();
-        const matrix = event.currentTarget.getScreenCTM()
-          .translate(event.currentTarget.getAttribute('cx') || 0, 
-                    event.currentTarget.getAttribute('cy') || 0);
-        
-        // Calculate position relative to the node
-        const nodeX = (matrix.e - bounds.left);
-        const nodeY = (matrix.f - bounds.top);
-
-        // Position tooltip with smooth transition
-        tooltipContainer
-          .html(content)
-          .style('left', `${nodeX}px`)
-          .style('top', `${nodeY - 10}px`) // Position slightly above the node
-          .style('transform', 'translate(-50%, -100%)')
-          .transition()
-          .duration(200)
-          .style('opacity', 1)
-          .style('top', `${nodeY - 20}px`); // Final position with slight upward movement
-
-        // Highlight the node
-        d3.select(event.currentTarget.parentNode)
-          .select('circle:not([fill="transparent"])')
-          .transition()
-          .duration(200)
-          .attr('r', 10)
-          .attr('stroke-width', 2);
+          const icon = document.createElement('div');
+          icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
+            <IconComponent width={16} height={16} stroke="white" strokeWidth={2} />
+          );
+          div.node().appendChild(icon.firstChild);
+        }
       }
-    };
+    });
 
-    const hideTooltip = (event) => {
+
+// Add labels with pointer-events disabled
+const labels = nodeGroup
+.append('text')
+.attr('dy', d => d.id.includes('Cluster') ? -30 : -15)
+.attr('text-anchor', 'middle')
+.attr('fill', 'white')
+.attr('font-size', '12px')
+.style('pointer-events', 'none') // Disable pointer events on labels
+.text(d => d.id.includes('Cluster') ? d.label : d.Vendor);
+
+// Enhanced tooltip behavior
+const showTooltip = (event, d) => {
+if (!d.id.includes('Cluster')) {
+  const content = `
+    <div style="min-width: 200px;">
+      <strong>MAC:</strong> ${d.MAC}<br>
+      <strong>IP:</strong> ${d.IP || 'N/A'}<br>
+      <strong>Vendor:</strong> ${d.Vendor || 'Unknown'}<br>
+      <strong>Type:</strong> ${d.type}<br>
+      <strong>Status:</strong> ${d.status === 'true' ? 'Active' : 'Inactive'}<br>
+      ${d.connections ? `<strong>Connected to:</strong> ${d.connections.join(', ')}` : ''}
+    </div>
+  `;
+
+  const bounds = svg.node().getBoundingClientRect();
+  const matrix = event.currentTarget.getScreenCTM()
+    .translate(event.currentTarget.getAttribute('cx') || 0, 
+              event.currentTarget.getAttribute('cy') || 0);
+  
+  const nodeX = (matrix.e - bounds.left);
+  const nodeY = (matrix.f - bounds.top);
+
+  tooltipContainer
+    .html(content)
+    .style('left', `${nodeX}px`)
+    .style('top', `${nodeY - 10}px`)
+    .style('transform', 'translate(-50%, -100%)')
+    .transition()
+    .duration(200)
+    .style('opacity', 1)
+    .style('top', `${nodeY - 20}px`);
+
+  // Highlight the node
+  d3.select(event.currentTarget.parentNode)
+    .select('circle:not([fill="transparent"])')
+    .transition()
+    .duration(200)
+    .attr('r', 10)
+    .attr('stroke-width', 2);
+}
+};
+
+
+
+const hideTooltip = (event) => {
       tooltipContainer
         .transition()
         .duration(200)
@@ -385,26 +390,8 @@ nodeGroup.each(function(d) {
       return `M${d.source.x},${d.source.y}A${dr * curve},${dr * curve} 0 0,1 ${d.target.x},${d.target.y}`;
     }
 
-    // Drag behavior
-    const drag = d3.drag()
-      .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      })
-      .on('drag', (event, d) => {
-        d.fx = event.x;
-        d.fy = event.y;
-      })
-      .on('end', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
-        if (!d.id.includes('Cluster')) {
-          d.fx = null;
-          d.fy = null;
-        }
-      });
+    
 
-    nodeGroup.call(drag);
 
     // Simulation update
     simulation.on('tick', () => {
