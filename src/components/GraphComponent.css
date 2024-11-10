@@ -1,0 +1,61 @@
+/* GraphComponent.css */
+.graph-tooltip {
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+  will-change: opacity, transform;
+}
+
+svg {
+  overflow: visible;
+}
+
+/* Add these new styles */
+text {
+  user-select: none;
+  -webkit-user-select: none;/* GraphComponent.css */
+  .graph-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+  }
+  
+  .graph-tooltip {
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    will-change: opacity, transform;
+  }
+  
+  svg {
+    overflow: visible;
+    display: block; /* Added to prevent extra space */
+  }
+  
+  /* Prevent text selection */
+  text {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    pointer-events: none;
+  }
+  
+  g {
+    pointer-events: none;
+  }
+  
+  circle {
+    pointer-events: all;
+    cursor: pointer;
+  }
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+g {
+  pointer-events: none;
+}
+
+circle {
+  pointer-events: all;
+}

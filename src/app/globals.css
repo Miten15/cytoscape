@@ -25,3 +25,11 @@ body {
     text-wrap: balance;
   }
 }
+
+
+.graph-tooltip {
+  font-family: sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
