@@ -1,13 +1,32 @@
 import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { Network, Server, Router } from 'lucide-react';
+import { Network, Server, Router, Monitor, Cpu } from 'lucide-react';
 import ReactDOMServer from 'react-dom/server';
+import { CiServer, CiRouter, CiDesktop } from "react-icons/ci";
+import { CircuitBoard } from 'lucide-react';
+
+// Add CSS for the blinking animation
+const styles = `
+  @keyframes blink {
+    0% { opacity: 0.4; }
+    50% { opacity: 1; }
+    100% { opacity: 0.4; }
+  }
+  .status-indicator {
+    animation: blink 2s infinite;
+  }
+`;
 
 const GraphComponent = ({ data }) => {
   const svgRef = useRef();
   const tooltipRef = useRef();
 
   useEffect(() => {
+    // Add the styles to the document
+    const styleSheet = document.createElement("style");
+    styleSheet.innerText = styles;
+    document.head.appendChild(styleSheet);
+
     if (!data || !Array.isArray(data) || !data[0].mac_data) {
       console.error('Invalid data format. Expected an array with "mac_data".');
       return;
@@ -27,7 +46,7 @@ const GraphComponent = ({ data }) => {
         y: 800, 
         width: 600, 
         height: 1800,
-        icon: Server
+        icon: CiServer
       },
       OT: { 
         id: 'OT_Cluster', 
@@ -47,7 +66,7 @@ const GraphComponent = ({ data }) => {
         y: 800, 
         width: 600, 
         height: 1800,
-        icon: Router
+        icon: CiRouter
       }
     };
 
@@ -112,7 +131,6 @@ const GraphComponent = ({ data }) => {
     d3.selectAll('.graph-tooltip').remove();
     d3.selectAll('.link-tooltip').remove();
     
-    // Create node tooltip with mouse following behavior
     // Create node tooltip with mouse following behavior
     const tooltipContainer = d3.select('body')
       .append('div')
@@ -190,17 +208,6 @@ const GraphComponent = ({ data }) => {
       .force('collision', d3.forceCollide().radius(50).strength(0.9));
 
     // Draw links with curved paths
-    const link = container.append('g')
-      .selectAll('path')
-      .data(links)
-      .join('path')
-      .attr('stroke', '#999')
-      .attr('stroke-opacity', 0.4)
-      .attr('stroke-width', d => d.source.id?.includes('Cluster') && d.target.id?.includes('Cluster') ? 2 : 1)
-      .attr('fill', 'none')
-      .attr('marker-end', 'url(#arrow)');
-
-    // Create an invisible wider path for better hover detection
     const linkHitArea = container.append('g')
       .selectAll('path')
       .data(links)
@@ -214,12 +221,8 @@ const GraphComponent = ({ data }) => {
           ${Array.isArray(d.protocol) ? d.protocol.join('<br>') : d.protocol}
         `;
 
-        //const bounds = svg.node().getBoundingClientRect();
-
-       // Position tooltip near mouse cursor with offset
-       const mouseX = event.pageX;
-       const mouseY = event.pageY;
-
+        const mouseX = event.pageX;
+        const mouseY = event.pageY;
 
         linkTooltip
           .html(content)
@@ -244,68 +247,91 @@ const GraphComponent = ({ data }) => {
       .selectAll('g')
       .data(nodes)
       .join('g')
-      .style('cursor', 'pointer'); // Add pointer cursor to indicate interactivity
-
-    // Add hit area first (will be at the bottom of the stack)
-    const nodeHitArea = nodeGroup
-      .append('circle')
-      .attr('r', d => d.id.includes('Cluster') ? 25 : 12)
-      .attr('fill', 'transparent')
-      .style('pointer-events', 'all')
       .style('cursor', 'pointer');
 
-    // Add visible node circle above hit area
-    const node = nodeGroup
-      .append('circle')
-      .attr('r', d => d.id.includes('Cluster') ? 20 : 8)
-      .attr('fill', d => clusters[d.type]?.color || 'gray')
-      .attr('stroke', d => d.status === 'true' ? '#00ff00' : '#ff0000')
-      .attr('stroke-width', 1.5)
-      .style('pointer-events', 'none'); // Disable pointer events on visible circle
+    // Add hit area for better interaction
+    const nodeHitArea = nodeGroup
+      .append('rect')
+      .attr('width', 24)
+      .attr('height', 24)
+      .attr('x', -12)
+      .attr('y', -12)
+      .attr('fill', 'transparent')
+      .style('pointer-events', 'all');
 
-    // Add icons for cluster nodes with pointer-events disabled
+    // Add icons for all nodes
+    const getIconForDevice = (type) => {
+      const iconMap = {
+        'IT': CiDesktop,
+        'OT': CircuitBoard,
+        'Network': Router,
+        'IT_Cluster': CiServer,
+        'OT_Cluster': Network,
+        'Network_Cluster': CiRouter
+      };
+      return iconMap[type] || Network;
+    };
+
     nodeGroup.each(function(d) {
+      // Add status indicator dot
+      if (!d.id.includes('Cluster')) {
+        d3.select(this)
+          .append('circle')
+          .attr('class', 'status-indicator')
+          .attr('r', 3)
+          .attr('cx', 0)
+          .attr('cy', -10)
+          .attr('fill', d.status === 'true' ? '#00ff00' : '#ff0000')
+          .style('pointer-events', 'none');
+      }
+
       if (d.id.includes('Cluster')) {
-        const IconComponent = clusters[d.id.split('_')[0]]?.icon;
-        if (IconComponent) {
-          const foreignObject = d3.select(this)
-            .append('foreignObject')
-            .attr('width', 24)
-            .attr('height', 24)
-            .attr('x', -12)
-            .attr('y', -12)
-            .style('pointer-events', 'none'); // Disable pointer events on icons
+        d3.select(this)
+          .append('circle')
+          .attr('r', 30)
+          .attr('fill', d.color || '#666')
+          .attr('opacity', 0.3)
+          .style('pointer-events', 'none');
+      }
 
-          const div = foreignObject
-            .append('xhtml:div')
-            .style('width', '100%')
-            .style('height', '100%')
-            .style('display', 'flex')
-            .style('align-items', 'center')
-            .style('justify-content', 'center')
-            .style('pointer-events', 'none'); // Disable pointer events on icon container
+      const IconComponent = getIconForDevice(d.type || d.id);
+      if (IconComponent) {
+        const foreignObject = d3.select(this)
+          .append('foreignObject')
+          .attr('width', 24)
+          .attr('height', 24)
+          .attr('x', -12)
+          .attr('y', -12)
+          .style('pointer-events', 'none');
 
-          const icon = document.createElement('div');
-          icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
-            <IconComponent width={16} height={16} stroke="white" strokeWidth={2} />
-          );
-          div.node().appendChild(icon.firstChild);
-        }
+        const div = foreignObject
+          .append('xhtml:div')
+          .style('width', '100%')
+          .style('height', '100%')
+          .style('display', 'flex')
+          .style('align-items', 'center')
+          .style('justify-content', 'center')
+          .style('pointer-events', 'none');
+
+        const icon = document.createElement('div');
+        icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
+          <IconComponent width={16} height={16} stroke="white" strokeWidth={1} />
+        );
+        div.node().appendChild(icon.firstChild);
       }
     });
 
+    // Add labels with pointer-events disabled
+    const labels = nodeGroup
+      .append('text')
+      .attr('dy', d => d.id.includes('Cluster') ? -30 : -15)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'white')
+      .attr('font-size', '12px')
+      .style('pointer-events', 'none')
+      .text(d => d.id.includes('Cluster') ? d.label : d.Vendor);
 
-// Add labels with pointer-events disabled
-const labels = nodeGroup
-.append('text')
-.attr('dy', d => d.id.includes('Cluster') ? -30 : -15)
-.attr('text-anchor', 'middle')
-.attr('fill', 'white')
-.attr('font-size', '12px')
-.style('pointer-events', 'none') // Disable pointer events on labels
-.text(d => d.id.includes('Cluster') ? d.label : d.Vendor);
-
-// Enhanced tooltip behavior with mouse following
+    // Enhanced tooltip behavior with mouse following
     const showTooltip = (event, d) => {
       if (!d.id.includes('Cluster')) {
         const content = `
@@ -319,16 +345,7 @@ const labels = nodeGroup
           </div>
         `;
 
-
-  const bounds = svg.node().getBoundingClientRect();
-  const matrix = event.currentTarget.getScreenCTM()
-    .translate(event.currentTarget.getAttribute('cx') || 0, 
-              event.currentTarget.getAttribute('cy') || 0);
-  
-  const nodeX = (matrix.e - bounds.left);
-  const nodeY = (matrix.f - bounds.top);
-
-   tooltipContainer
+        tooltipContainer
           .html(content)
           .style('left', `${event.clientX + 15}px`)
           .style('top', `${event.clientY - 10}px`)
@@ -336,14 +353,15 @@ const labels = nodeGroup
 
         // Highlight the node
         d3.select(event.currentTarget.parentNode)
-          .select('circle:not([fill="transparent"])')
+          .select('foreignObject')
           .transition()
           .duration(200)
-          .attr('r', 10)
-          .attr('stroke-width', 2);
+          .attr('width', 28)
+          .attr('height', 28)
+          .attr('x', -14)
+          .attr('y', -14);
       }
     };
-
 
     const hideTooltip = (event) => {
       tooltipContainer
@@ -352,13 +370,14 @@ const labels = nodeGroup
         .style('opacity', 0);
 
       d3.select(event.currentTarget.parentNode)
-        .select('circle:not([fill="transparent"])')
+        .select('foreignObject')
         .transition()
         .duration(200)
-        .attr('r', d => d.id.includes('Cluster') ? 20 : 8)
-        .attr('stroke-width', 1.5);
+        .attr('width', 24)
+        .attr('height', 24)
+        .attr('x', -12)
+        .attr('y', -12);
     };
-    
 
     // Update mousemove handler for smooth tooltip following
     nodeHitArea
@@ -366,7 +385,6 @@ const labels = nodeGroup
       .on('mouseout', hideTooltip)
       .on('mousemove', (event, d) => {
         if (!d.id.includes('Cluster')) {
-          // Get correct mouse position including scroll offset
           const x = event.clientX + window.pageXOffset;
           const y = event.clientY + window.pageYOffset;
           
@@ -376,16 +394,40 @@ const labels = nodeGroup
         }
       });
 
-    // Curved links function
+    // Modified linkArc function to create straight lines
     function linkArc(d) {
-      const dx = d.target.x - d.source.x;
-      const dy = d.target.y - d.source.y;
-      const dr = Math.sqrt(dx * dx + dy * dy);
-      const curve = d.source.id?.includes('Cluster') && d.target.id?.includes('Cluster') ? 2 : 1;
-      return `M${d.source.x},${d.source.y}A${dr * curve},${dr * curve} 0 0,1 ${d.target.x},${d.target.y}`;
+      const sourceNode = d.source;
+      const targetNode = d.target;
+      
+      // Calculate the angle between nodes
+      const dx = targetNode.x - sourceNode.x;
+      const dy = targetNode.y - sourceNode.y;
+      const angle = Math.atan2(dy, dx);
+      
+      // Set offset based on node type
+      const sourceOffset = sourceNode.id?.includes('Cluster') ? 30 : 12;
+      const targetOffset = targetNode.id?.includes('Cluster') ? 30 : 12;
+      
+      // Calculate start and end points
+      const startX = sourceNode.x + Math.cos(angle) * sourceOffset;
+      const startY = sourceNode.y + Math.sin(angle) * sourceOffset;
+      const endX = targetNode.x - Math.cos(angle) * targetOffset;
+      const endY = targetNode.y - Math.sin(angle) * targetOffset;
+      
+      // Return a straight line path
+      return `M${startX},${startY}L${endX},${endY}`;
     }
 
-    
+    // Update link paths to use straight lines
+    const link = container.append('g')
+      .selectAll('path')
+      .data(links)
+      .join('path')
+      .attr('stroke', '#999')
+      .attr('stroke-opacity', 0.4)
+      .attr('stroke-width', d => d.source.id?.includes('Cluster') && d.target.id?.includes('Cluster') ? 2 : 1)
+      .attr('fill', 'none')
+      .attr('marker-end', 'url(#arrow)');
 
 
     // Simulation update
@@ -446,20 +488,19 @@ const labels = nodeGroup
       const g = statusLegend.append('g')
         .attr('transform', `translate(0, ${i * 25 + 15})`);
 
-      g.append('circle')
-        .attr('r', 6)
-        .attr('stroke', item.color)
-        .attr('fill', 'none')
-        .attr('stroke-width', 2);
+      g.append('rect')
+        .attr('width', 12)
+        .attr('height', 12)
+        .attr('fill', item.color);
 
       g.append('text')
-        .attr('x', 15)
-        .attr('y', 5)
+        .attr('x', 20)
+        .attr('y', 10)
         .attr('fill', 'white')
         .text(item.label);
     });
 
-    // Add cluster type legend
+    // Add node type legend
     const typeLegend = legend.append('g')
       .attr('transform', 'translate(0, 80)');
 
@@ -467,21 +508,41 @@ const labels = nodeGroup
       .attr('x', 0)
       .attr('y', 0)
       .attr('fill', 'white')
-      .text('Cluster Types:');
+      .text('Node Types:');
 
-    Object.entries(clusters).forEach(([type, cluster], i) => {
+    const nodeTypes = [
+      { type: 'IT', label: 'IT', icon: CiDesktop },
+      { type: 'OT', label: 'OT', icon: CircuitBoard },
+      { type: 'Network', label: 'Network', icon: Router }
+    ];
+
+    nodeTypes.forEach((item, i) => {
       const g = typeLegend.append('g')
         .attr('transform', `translate(0, ${i * 25 + 15})`);
 
-      g.append('circle')
-        .attr('r', 6)
-        .attr('fill', cluster.color);
+      const icon = document.createElement('div');
+      icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
+        <item.icon width={16} height={16} stroke="white" strokeWidth={1} />
+      );
+
+      g.append('foreignObject')
+        .attr('width', 16)
+        .attr('height', 16)
+        .style('pointer-events', 'none')
+        .append('xhtml:div')
+        .style('width', '100%')
+        .style('height', '100%')
+        .style('display', 'flex')
+        .style('align-items', 'center')
+        .style('justify-content', 'center')
+        .node()
+        .appendChild(icon.firstChild);
 
       g.append('text')
-        .attr('x', 15)
-        .attr('y', 5)
+        .attr('x', 24)
+        .attr('y', 12)
         .attr('fill', 'white')
-        .text(cluster.label);
+        .text(item.label);
     });
 
     // Add instructions text
@@ -510,6 +571,7 @@ const labels = nodeGroup
       simulation.stop();
       d3.selectAll('.graph-tooltip').remove();
       d3.selectAll('.link-tooltip').remove();
+      document.head.removeChild(styleSheet);
     };
   }, [data]);
 
@@ -521,3 +583,4 @@ const labels = nodeGroup
 };
 
 export default GraphComponent;
+
