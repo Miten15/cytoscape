@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.4",
     "@tabler/icons-react": "^3.19.0",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cytoscape": "^3.30.2",
     "cytoscape-avsdf": "^1.0.0",
@@ -26,7 +28,8 @@
     "react-dom": "^18",
     "react-dropzone": "^14.2.9",
     "react-icons": "^5.3.0",
-    "tailwind-merge": "^2.5.3",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7",
     "tippy.js": "^6.3.7"
   },
   "devDependencies": {

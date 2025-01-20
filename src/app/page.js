@@ -17,7 +17,7 @@ const Page = () => {
             </h2>
             <FileUpload onChange={setNetworkData} /> {/* Set networkData with uploaded file */}
             
-            <div className="pt-10">
+            <div className="pt-10 w-full h-screen">
               {networkData ? (
                 <GraphComponent data={networkData} /> 
               ) : (
