@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import * as d3 from "d3"
 import { CircuitBoard, Laptop, Router, Monitor } from "lucide-react"
 import ReactDOMServer from "react-dom/server"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Toast,
+  ToastProps,
+  ToastActionElement,
+  ToastProvider,
+  ToastViewport,
+  ToastTitle,
+  ToastDescription,
+  ToastClose,
+  ToastAction,
+} from "@/components/ui/toast"
+import { useToast } from "@/components/ui/use-toast"
 
 const styles = `
   @keyframes blink {
@@ -62,13 +74,13 @@ const styles = `
 const ICON_SIZE = 26
 const CLUSTER_RADIUS = 200
 const CLUSTER_PADDING = 60
-
 const GraphComponent = ({ data }) => {
   const svgRef = useRef()
   const [selectedNode, setSelectedNode] = useState(null)
   const [showDialog, setShowDialog] = useState(false)
   const [nodes, setNodes] = useState([])
   const [links, setLinks] = useState([])
+  const { toast } = useToast()
 
   useEffect(() => {
     const styleSheet = document.createElement("style")
@@ -90,30 +102,30 @@ const GraphComponent = ({ data }) => {
       IT: {
         id: "IT_Cluster",
         label: "IT Cluster",
-        x: window.innerWidth * 0.15,
-        y: window.innerHeight * 0.3,
+        x: window.innerWidth * 0.2,
+        y: window.innerHeight * 0.5,
         icon: Laptop,
-        color: "#4287f5",
+        color: "#4287f55c",
       },
       Network: {
         id: "Network_Cluster",
         label: "Network Cluster",
-        x: window.innerWidth * 0.85,
-        y: window.innerHeight * 0.3,
+        x: window.innerWidth * 0.5,
+        y: window.innerHeight * 0.5,
         icon: Router,
-        color: "#f54242",
+        color: "#f5424255",
       },
       OT: {
         id: "OT_Cluster",
         label: "OT Cluster",
-        x: window.innerWidth * 0.5,
-        y: window.innerHeight * 0.3,
+        x: window.innerWidth * 0.8,
+        y: window.innerHeight * 0.5,
         icon: CircuitBoard,
-        color: "#42f54e",
+        color: "#42f54e50",
       },
       Unconnected: {
         id: "Unconnected_Cluster",
-        label: "Unconnected Devices",
+        label: "Public Devices",
         x: window.innerWidth * 0.5,
         y: window.innerHeight * 1.1,
         icon: Monitor,
@@ -123,29 +135,86 @@ const GraphComponent = ({ data }) => {
 
     // Function to check if IP is public
     const isPublicIP = (ip) => {
-      if (!ip || typeof ip !== "string") return false
+      if (ip === "Null" || !ip || typeof ip !== "string") return true
       const parts = ip.split(".")
-      if (parts.length !== 4) return false
+      if (parts.length !== 4) return true
+      const firstOctet = Number.parseInt(parts[0], 10)
+      const secondOctet = Number.parseInt(parts[1], 10)
       return !(
-        parts[0] === "10" ||
-        (parts[0] === "172" && Number.parseInt(parts[1], 10) >= 16 && Number.parseInt(parts[1], 10) <= 31) ||
-        (parts[0] === "192" && parts[1] === "168")
+        firstOctet === 10 ||
+        (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+        (firstOctet === 192 && secondOctet === 168)
       )
+    }
+
+    const isDNSResolverIP = (ip) => {
+      const dnsResolverIPs = ["1.1.1.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"]
+      return dnsResolverIPs.includes(ip)
+    }
+
+    const classifyDevice = (device) => {
+      const ips = Array.isArray(device.IP) ? device.IP : [device.IP]
+      let clusterType = "Unconnected"
+      let hasPublicIP = false
+
+      // Check the first IP (primary IP) for classification
+      const primaryIP = ips[0]
+
+      if (device.Vendor.includes("Cisco Systems") || device.type === "Network") {
+        clusterType = "Network"
+      } else if (
+        primaryIP.startsWith("172.16.") ||
+        primaryIP.startsWith("172.17.") ||
+        primaryIP.startsWith("172.18.") ||
+        primaryIP.startsWith("172.19.") ||
+        primaryIP.startsWith("172.20.") ||
+        primaryIP.startsWith("172.21.") ||
+        primaryIP.startsWith("172.22.") ||
+        primaryIP.startsWith("172.23.") ||
+        primaryIP.startsWith("172.24.") ||
+        primaryIP.startsWith("172.25.") ||
+        primaryIP.startsWith("172.26.") ||
+        primaryIP.startsWith("172.27.") ||
+        primaryIP.startsWith("172.28.") ||
+        primaryIP.startsWith("172.29.") ||
+        primaryIP.startsWith("172.30.") ||
+        primaryIP.startsWith("172.31.") ||
+        device.Vendor === "Tenda Technology Co.,Ltd.Dongguan branch"
+      ) {
+        clusterType = "OT"
+      } else if (
+        primaryIP.startsWith("192.168.") ||
+        primaryIP.startsWith("10.") ||
+        device.Vendor === "TELEMECANIQUE ELECTRIQUE"
+      ) {
+        clusterType = "IT"
+      }
+
+      // Check for public IPs
+      ips.forEach((ip) => {
+        if (isPublicIP(ip) && !isDNSResolverIP(ip)) {
+          hasPublicIP = true
+        }
+      })
+
+      if (hasPublicIP) {
+        toast({
+          title: "Public IP Detected",
+          description: `Device ${device.Vendor} (${device.MAC}) has a public IP address.`,
+          duration: 5000,
+        })
+      }
+
+      return { clusterType, hasPublicIP }
     }
 
     // Process nodes
     let hasUnconnectedNodes = false
-    macData.forEach((category, index) => {
-      const clusterType = index === 0 ? "IT" : index === 1 ? "Network" : "OT"
-
+    macData.forEach((category) => {
       Object.values(category).forEach((devices) => {
         devices.forEach((device) => {
-          const isPublic = isPublicIP(device.IP)
-          const deviceType = isPublic ? "Unconnected" : clusterType
-
-          if (isPublic) {
-            hasUnconnectedNodes = true
-          }
+          const { clusterType, hasPublicIP } = classifyDevice(device)
+          hasUnconnectedNodes = hasUnconnectedNodes || clusterType === "Unconnected"
 
           const deviceNode = {
             id: device.MAC,
@@ -155,9 +224,10 @@ const GraphComponent = ({ data }) => {
             Protocol: Array.isArray(device.Protocol) ? device.Protocol : [device.Protocol],
             Port: Array.isArray(device.Port) ? device.Port : [device.Port],
             status: device.status,
-            type: deviceType,
+            type: clusterType,
             connections: device[device.MAC] || [],
-            cluster: clusters[deviceType],
+            cluster: clusters[clusterType],
+            hasPublicIP: hasPublicIP,
             fx: null,
             fy: null,
           }
@@ -201,7 +271,6 @@ const GraphComponent = ({ data }) => {
 
     // Create tooltips
     const nodeTooltip = d3.select("body").append("div").attr("class", "node-popup").style("opacity", 0)
-
     const linkTooltip = d3.select("body").append("div").attr("class", "link-tooltip").style("opacity", 0)
 
     const container = svg.append("g")
@@ -265,7 +334,7 @@ const GraphComponent = ({ data }) => {
       .force("cluster", (alpha) => {
         newNodes.forEach((node) => {
           if (node.cluster) {
-            const k = alpha * 0.8
+            const k = alpha * 1.5 // Increased strength
             const dx = node.x - node.cluster.x
             const dy = node.y - node.cluster.y
             const dist = Math.sqrt(dx * dx + dy * dy)
@@ -287,7 +356,6 @@ const GraphComponent = ({ data }) => {
       .join("line")
       .attr("stroke", "#666")
       .attr("stroke-width", 0.2)
-      //.attr("stroke-dasharray", "5,5")
       .on("mouseover", (event, d) => {
         const content = `
           <div class="connection-details">Connection Details</div>
@@ -332,21 +400,20 @@ const GraphComponent = ({ data }) => {
         setShowDialog(true)
       })
       .on("mouseover", (event, d) => {
-        if (!d.isCluster) {
-          const content = `
-            <div>
-              <strong>${d.Vendor}</strong><br>
-              MAC: ${d.MAC}<br>
-              IP: ${Array.isArray(d.IP) ? d.IP.join(", ") : d.IP}<br>
-              Status: ${d.status === "true" ? "Active" : "Inactive"}
-            </div>
-          `
-          nodeTooltip
-            .html(content)
-            .style("left", `${event.pageX + 15}px`)
-            .style("top", `${event.pageY}px`)
-            .style("opacity", 1)
-        }
+        const content = `
+          <div>
+            <strong>${d.Vendor}</strong><br>
+            MAC: ${d.MAC}<br>
+            IP: ${Array.isArray(d.IP) ? d.IP.join(", ") : d.IP}<br>
+            Status: ${d.status === "true" ? "Active" : "Inactive"}
+            ${d.hasPublicIP ? '<br><strong style="color: #ff6b6b;">Has Public IP</strong>' : ""}
+          </div>
+        `
+        nodeTooltip
+          .html(content)
+          .style("left", `${event.pageX + 15}px`)
+          .style("top", `${event.pageY}px`)
+          .style("opacity", 1)
       })
       .on("mouseout", () => {
         nodeTooltip.style("opacity", 0)
@@ -355,29 +422,27 @@ const GraphComponent = ({ data }) => {
     // Add icons to nodes
     node.each(function (d) {
       const IconComponent = getIconForDevice(d.type)
-      if (IconComponent) {
-        const foreignObject = d3
-          .select(this)
-          .append("foreignObject")
-          .attr("width", ICON_SIZE)
-          .attr("height", ICON_SIZE)
-          .attr("x", -ICON_SIZE / 2)
-          .attr("y", -ICON_SIZE / 2)
+      const foreignObject = d3
+        .select(this)
+        .append("foreignObject")
+        .attr("width", ICON_SIZE)
+        .attr("height", ICON_SIZE)
+        .attr("x", -ICON_SIZE / 2)
+        .attr("y", -ICON_SIZE / 2)
 
-        const div = foreignObject
-          .append("xhtml:div")
-          .style("width", "100%")
-          .style("height", "100%")
-          .style("display", "flex")
-          .style("align-items", "center")
-          .style("justify-content", "center")
+      const div = foreignObject
+        .append("xhtml:div")
+        .style("width", "100%")
+        .style("height", "100%")
+        .style("display", "flex")
+        .style("align-items", "center")
+        .style("justify-content", "center")
 
-        const icon = document.createElement("div")
-        icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
-          <IconComponent width={ICON_SIZE} height={ICON_SIZE} stroke="white" strokeWidth={1.5} />,
-        )
-        div.node().appendChild(icon.firstChild)
-      }
+      const icon = document.createElement("div")
+      icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
+        <IconComponent width={ICON_SIZE} height={ICON_SIZE} stroke="white" strokeWidth={1.5} />,
+      )
+      div.node().appendChild(icon.firstChild)
     })
 
     // Add status indicators
@@ -415,7 +480,7 @@ const GraphComponent = ({ data }) => {
       linkTooltip.remove()
       document.head.removeChild(styleSheet)
     }
-  }, [data])
+  }, [data, toast])
 
   function getIconForDevice(type) {
     const icons = {
@@ -449,6 +514,12 @@ const GraphComponent = ({ data }) => {
                   <div>{selectedNode.type}</div>
                   <div className="text-muted-foreground">Status:</div>
                   <div>{selectedNode.status === "true" ? "Active" : "Inactive"}</div>
+                  {selectedNode.hasPublicIP && (
+                    <>
+                      <div className="text-muted-foreground">Public IP:</div>
+                      <div className="text-red-500">Yes</div>
+                    </>
+                  )}
                 </div>
               </div>
 

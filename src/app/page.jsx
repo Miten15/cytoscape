@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { BackgroundLines } from "@/components/ui/background-lines"
 import { FileUpload } from "@/components/ui/file-upload"
+import Navbar from "../components/ui/navbar"
 
 export default function Page() {
   const router = useRouter()
@@ -11,7 +12,6 @@ export default function Page() {
 
   const handleFileUpload = async (data) => {
     if (data) {
-      // Store data in localStorage instead of URL params
       localStorage.setItem("networkData", JSON.stringify(data))
       router.push("/graph-page")
     }
@@ -19,6 +19,7 @@ export default function Page() {
 
   return (
     <div className="min-h-screen">
+      <Navbar />
       <BackgroundLines className="flex items-center justify-center w-full flex-col px-4">
         <h2 className="bg-clip-text text-transparent text-center bg-gradient-to-b from-neutral-900 to-neutral-700 dark:from-neutral-600 dark:to-white text-2xl md:text-4xl lg:text-7xl font-sans py-2 md:py-10 relative z-20 font-bold tracking-tight">
           Network Graph Uploader
