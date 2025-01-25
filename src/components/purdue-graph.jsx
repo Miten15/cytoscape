@@ -1,228 +1,449 @@
 "use client"
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
+
+import React, { useEffect, useRef, useState, useCallback } from "react"
 import * as d3 from "d3"
-import { Server, Router, Cpu, Terminal, Camera, Gauge } from "lucide-react"
+import {
+  Laptop,
+  Router,
+  Server,
+  PinIcon as Chip,
+  Cpu,
+  Factory,
+  Network,
+  HardHat,
+  Wrench,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
 import ReactDOMServer from "react-dom/server"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { useToast } from "@/components/ui/use-toast"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
-const PurdueHierarchy = ({ data }) => {
+const ICON_SIZE = 40
+const ZONE_PADDING = 60
+const ZONE_WIDTH = 1600
+const ZONE_HEIGHT = 220
+const LEVEL_GAP = 40
+const NODES_PER_LINE = 12
+const NODE_GAP = 120
+
+const ZONE_DEFINITIONS = [
+  {
+    name: "OT Devices (Level 1)",
+    level: 1,
+    y: ZONE_HEIGHT * 2 + LEVEL_GAP * 2,
+    color: "from-emerald-50 to-emerald-100/80",
+    borderColor: "border-emerald-200",
+    height: ZONE_HEIGHT * 1.5, // Increased height for OT zone
+  },
+  {
+    name: "Network Devices (Level 2)",
+    level: 2,
+    y: ZONE_HEIGHT + LEVEL_GAP,
+    color: "from-amber-50 to-amber-100/80",
+    borderColor: "border-amber-200",
+    height: ZONE_HEIGHT,
+  },
+  {
+    name: "IT Devices (Level 3)",
+    level: 3,
+    y: 0,
+    color: "from-blue-50 to-blue-100/80",
+    borderColor: "border-blue-200",
+    height: ZONE_HEIGHT,
+  },
+]
+
+export default function PurdueGraph({ data, mode }) {
   const svgRef = useRef(null)
-  const [selectedDevice, setSelectedDevice] = useState(null)
-  const { toast } = useToast()
+  const tooltipRef = useRef(null)
+  const [selectedNode, setSelectedNode] = useState(null)
+  const [showDialog, setShowDialog] = useState(false)
 
-  // Memoize LEVELS to prevent unnecessary recreations
-  const LEVELS = useMemo(() => [
-    { name: "Level 3", y: 50, devices: ["OT", "Endpoint", "Camera", "Streamer"] },
-    { name: "Level 2", y: 250, devices: ["SCADA Server", "HMI", "Engineering Station"] },
-    { name: "Level 1", y: 450, devices: ["PLC"] }
-  ], [])
+  const classifyDevice = useCallback((device) => {
+    const ips = Array.isArray(device.IP) ? device.IP : [device.IP || ""]
 
-  const processDeviceData = useCallback((rawData) => {
-    try {
-      if (!rawData?.[0]?.mac_data) {
-        throw new Error("Invalid data structure")
-      }
+    if (device.Vendor?.includes("Cisco") || device.Type === "Network") {
+      return ZONE_DEFINITIONS.find((z) => z.level === 2)
+    }
 
-      const nodes = []
-      const nodeMap = new Map()
+    if (
+      ips.some((ip) => ip?.startsWith("172.")) ||
+      ["PLC", "RTU", "Sensor", "Actuator"].some((type) => device.Type?.includes(type))
+    ) {
+      return ZONE_DEFINITIONS.find((z) => z.level === 1)
+    }
 
-      rawData[0].mac_data.forEach(category => {
-        Object.values(category).forEach(devices => {
-          devices.forEach(device => {
-            const node = {
-              id: device.MAC,
-              mac: device.MAC,
-              ip: device.IP,
-              vendor: device.Vendor,
-              protocols: device.Protocol,
-              status: device.status,
-              type: device.Type,
-              connections: device[device.MAC] || []
-            }
-            nodes.push(node)
-            nodeMap.set(device.MAC, node)
-          })
+    return ZONE_DEFINITIONS.find((z) => z.level === 3)
+  }, [])
+
+  const getIconForDevice = useCallback((device) => {
+    if (device.zone?.level === 1) {
+      if (device.Type?.includes("PLC")) return Chip
+      if (device.Type?.includes("Sensor")) return Cpu
+      if (device.Type?.includes("Actuator")) return Wrench
+      return Factory
+    }
+    if (device.zone?.level === 2) return Network
+    return device.Type?.includes("Workstation") ? Laptop : Server
+  }, [])
+
+  const calculatePosition = useCallback((index, zoneY, totalNodes) => {
+    const rows = Math.ceil(totalNodes / NODES_PER_LINE)
+    const lastRowNodes = totalNodes % NODES_PER_LINE || NODES_PER_LINE
+    const isLastRow = Math.floor(index / NODES_PER_LINE) === rows - 1
+    const nodesInThisRow = isLastRow ? lastRowNodes : NODES_PER_LINE
+
+    const row = Math.floor(index / NODES_PER_LINE)
+    const col = index % NODES_PER_LINE
+
+    // Calculate offset to center nodes in the row
+    const rowOffset = ((NODES_PER_LINE - nodesInThisRow) * NODE_GAP) / 2
+
+    const x = ZONE_PADDING + col * NODE_GAP + NODE_GAP / 2 + rowOffset
+    const y = zoneY + ZONE_PADDING + row * NODE_GAP + NODE_GAP / 2
+    return { x, y }
+  }, [])
+
+  useEffect(() => {
+    if (!svgRef.current || !data?.[0]?.mac_data) return
+
+    const width = ZONE_WIDTH
+    const height = ZONE_HEIGHT * 3 + LEVEL_GAP * 2
+
+    const svg = d3.select(svgRef.current).attr("width", width).attr("height", height).style("background-color", "white")
+
+    svg.selectAll("*").remove()
+
+    // Create tooltip
+    const tooltip = d3
+      .select(tooltipRef.current)
+      .style("position", "absolute")
+      .style("visibility", "hidden")
+      .style("background-color", "rgba(255, 255, 255, 0.95)")
+      .style("border", "1px solid #e2e8f0")
+      .style("border-radius", "8px")
+      .style("padding", "12px")
+      .style("box-shadow", "0 4px 6px -1px rgba(0, 0, 0, 0.1)")
+      .style("font-size", "12px")
+      .style("z-index", "50")
+
+    // Create zoom behavior
+    const zoom = d3
+      .zoom()
+      .scaleExtent([0.5, 2])
+      .on("zoom", (event) => {
+        container.attr("transform", event.transform)
+      })
+
+    svg.call(zoom)
+
+    const container = svg.append("g")
+
+    // Draw zones
+    ZONE_DEFINITIONS.forEach((zone) => {
+      const gradientId = `zone-gradient-${zone.level}`
+      const gradient = container
+        .append("defs")
+        .append("linearGradient")
+        .attr("id", gradientId)
+        .attr("x1", "0%")
+        .attr("y1", "0%")
+        .attr("x2", "100%")
+        .attr("y2", "0%")
+
+      gradient
+        .append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", zone.level === 1 ? "#10B98160" : zone.level === 2 ? "#F59E0B60" : "#3B82F630")
+
+      gradient
+        .append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", zone.level === 1 ? "#10B98130" : zone.level === 2 ? "#F59E0B30" : "#3B82F630")
+
+      container
+        .append("rect")
+        .attr("x", ZONE_PADDING)
+        .attr("y", zone.y)
+        .attr("width", width - ZONE_PADDING * 2)
+        .attr("height", zone.height || ZONE_HEIGHT) // Use custom height if specified
+        .attr("fill", `url(#${gradientId})`)
+        .attr("rx", 16)
+        .attr("filter", "drop-shadow(0 4px 6px rgb(0 0 0 / 0.05))")
+        .attr("stroke", zone.level === 1 ? "#10B98140" : zone.level === 2 ? "#F59E0B40" : "#3B82F640")
+        .attr("stroke-width", 2)
+
+      container
+        .append("text")
+        .attr("x", ZONE_PADDING + 20)
+        .attr("y", zone.y + 30)
+        .style("font-size", "16px")
+        .style("font-weight", "600")
+        .attr("fill", "#1a2b4b")
+        .text(zone.name)
+    })
+
+    // Process nodes
+    const nodes = []
+    const links = []
+    const nodeMap = new Map()
+    const nodesByZone = new Map(ZONE_DEFINITIONS.map((zone) => [zone.level, []]))
+
+    data[0].mac_data.forEach((category) => {
+      Object.values(category).forEach((devices) => {
+        devices.forEach((device) => {
+          const normalizedDevice = {
+            MAC: device.MAC || "Unknown",
+            IP: Array.isArray(device.IP) ? device.IP : [device.IP || "Unknown"],
+            Protocol: Array.isArray(device.Protocol) ? device.Protocol : [device.Protocol || "Unknown"],
+            Type: device.Type || "Unknown",
+            Vendor: device.Vendor || "Unknown Vendor",
+            status: device.status || "unknown",
+            connections: device[device.MAC] || [],
+          }
+
+          const zone = classifyDevice(normalizedDevice)
+          const node = {
+            ...normalizedDevice,
+            id: normalizedDevice.MAC,
+            zone,
+          }
+          nodes.push(node)
+          nodeMap.set(normalizedDevice.MAC, node)
+          nodesByZone.get(zone.level).push(node)
         })
       })
+    })
 
-      return { nodes, nodeMap }
-    } catch (error) {
-      console.error("Data processing error:", error)
-      toast({
-        title: "Data Error",
-        description: "Failed to process network data",
-        variant: "destructive"
+    // Position nodes
+    nodesByZone.forEach((zoneNodes, level) => {
+      const zone = ZONE_DEFINITIONS.find((z) => z.level === level)
+
+      zoneNodes.forEach((node, index) => {
+        const position = calculatePosition(index, zone.y, zoneNodes.length)
+        node.fx = position.x
+        node.fy = position.y
       })
-      return { nodes: [], nodeMap: new Map() }
-    }
-  }, [toast])
+    })
 
-  const renderConnections = useCallback((svg, nodes, nodeMap) => {
-    const connections = []
-    
-    nodes.forEach(node => {
-      node.connections.forEach(targetMac => {
+    // Create connections
+    nodes.forEach((node) => {
+      node.connections.forEach((targetMac) => {
         if (nodeMap.has(targetMac)) {
-          connections.push({
-            source: node,
-            target: nodeMap.get(targetMac)
+          links.push({
+            source: node.id,
+            target: targetMac,
+            protocol: node.Protocol,
           })
         }
       })
     })
 
-    svg.selectAll(".connection")
-      .data(connections)
-      .join("line")
-      .attr("class", "connection")
-      .attr("stroke", "#ced4da")
+    // Draw connections
+    const link = container
+      .append("g")
+      .selectAll("path")
+      .data(links)
+      .join("path")
+      .attr("class", "connection-line")
+      .attr("stroke", "#64748b30")
       .attr("stroke-width", 1.5)
-      .attr("x1", d => d.source.x)
-      .attr("y1", d => d.source.y)
-      .attr("x2", d => d.target.x)
-      .attr("y2", d => d.target.y)
-  }, [])
+      .attr("stroke-dasharray", "4,4")
+      .attr("fill", "none")
 
-  const renderDevices = useCallback((svg, processedData) => {
-    const { nodes } = processedData
+    // Create node groups
+    const nodeGroup = container
+      .append("g")
+      .selectAll("g")
+      .data(nodes)
+      .join("g")
+      .attr("cursor", "pointer")
+      .on("click", (e, d) => {
+        setSelectedNode(d)
+        setShowDialog(true)
+      })
+      .on("mouseover", (event, d) => {
+        tooltip
+          .style("visibility", "visible")
+          .html(`
+            <div class="space-y-2">
+              <div class="font-semibold">${d.Vendor}</div>
+              <div class="text-slate-600">MAC: ${d.MAC}</div>
+              <div class="text-slate-600">IP: ${Array.isArray(d.IP) ? d.IP.join(", ") : d.IP}</div>
+              <div class="text-slate-600">Type: ${d.Type}</div>
+              <div class="flex items-center gap-2">
+                <span class="text-slate-600">Status:</span>
+                <span class="${d.status === "true" ? "text-emerald-600" : "text-red-600"}">
+                  ${d.status === "true" ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+          `)
+          .style("left", `${event.pageX + 10}px`)
+          .style("top", `${event.pageY - 10}px`)
+      })
+      .on("mousemove", (event) => {
+        tooltip.style("left", `${event.pageX + 10}px`).style("top", `${event.pageY - 10}px`)
+      })
+      .on("mouseout", () => {
+        tooltip.style("visibility", "hidden")
+      })
 
-    nodes.forEach(node => {
-      const level = LEVELS.find(l => l.devices.includes(node.type))
-      if (!level) return
-
-      const deviceGroup = svg.append("g")
-        .attr("transform", `translate(${node.x},${node.y})`)
-        .attr("class", "device-group")
-        .on("click", () => setSelectedDevice(node))
-
-      // Device card
-      deviceGroup.append("rect")
-        .attr("width", 180)
-        .attr("height", 80)
-        .attr("fill", "#fff")
-        .attr("stroke", "#dee2e6")
-        .attr("rx", 6)
-
-      // Device icon
-      const iconMap = {
-        PLC: Cpu,
-        "SCADA Server": Server,
-        HMI: Terminal,
-        Router: Router,
-        Camera: Camera
-      }
-      
-      const Icon = iconMap[node.type] || Gauge
-      deviceGroup.append("foreignObject")
-        .attr("x", 20)
-        .attr("y", 15)
-        .attr("width", 40)
-        .attr("height", 40)
-        .html(ReactDOMServer.renderToStaticMarkup(<Icon size={40} className="text-primary" />))
-
-      // Device info
-      deviceGroup.append("text")
-        .attr("x", 70)
-        .attr("y", 30)
-        .text(node.vendor)
-      
-      deviceGroup.append("text")
-        .attr("x", 70)
-        .attr("y", 50)
-        .text(node.ip)
+    // Add device icons
+    nodeGroup.each(function (d) {
+      const Icon = getIconForDevice(d)
+      const iconHTML = ReactDOMServer.renderToStaticMarkup(
+        <Icon
+          width={ICON_SIZE}
+          height={ICON_SIZE}
+          className="text-slate-700 transition-colors duration-200 group-hover:text-slate-900"
+          strokeWidth={1.5}
+        />,
+      )
+      d3.select(this)
+        .append("foreignObject")
+        .attr("width", ICON_SIZE)
+        .attr("height", ICON_SIZE)
+        .attr("x", -ICON_SIZE / 2)
+        .attr("y", -ICON_SIZE / 2)
+        .html(iconHTML)
     })
-  }, [LEVELS])
 
-  useEffect(() => {
-    if (!svgRef.current || !data) return
+    // Add vendor labels
+    nodeGroup
+      .append("text")
+      .text((d) => d.Vendor)
+      .attr("text-anchor", "middle")
+      .attr("y", ICON_SIZE / 2 + 20)
+      .style("font-size", "11px")
+      .style("font-weight", "500")
+      .attr("fill", "#1e293b")
+      .style("pointer-events", "none")
+      .call(wrap, NODE_GAP - 20)
 
-    const width = 1200
-    const height = 600
-    const svg = d3.select(svgRef.current)
-      .attr("width", width)
-      .attr("height", height)
-      .style("background", "#f8f9fa")
+    // Add status indicators
+    nodeGroup
+      .append("circle")
+      .attr("r", 5)
+      .attr("cx", ICON_SIZE / 2 - 6)
+      .attr("cy", -ICON_SIZE / 2 + 6)
+      .attr("fill", (d) => (d.status === "true" ? "#22c55e" : "#ef4444"))
+      .attr("filter", "drop-shadow(0 1px 2px rgb(0 0 0 / 0.1))")
 
-    // Clear previous elements
-    svg.selectAll("*").remove()
+    // Simple force simulation for connections
+    const simulation = d3
+      .forceSimulation(nodes)
+      .force(
+        "link",
+        d3.forceLink(links).id((d) => d.id),
+      )
+      .force("charge", d3.forceManyBody().strength(-50))
+      .force("collision", d3.forceCollide(ICON_SIZE))
 
-    try {
-      // Process data and create hierarchy
-      const processedData = processDeviceData(data)
-      
-      // Create force simulation
-      const simulation = d3.forceSimulation(processedData.nodes)
-        .force("charge", d3.forceManyBody().strength(-50))
-        .force("x", d3.forceX(width/2).strength(0.1))
-        .force("y", d3.forceY(d => LEVELS.find(l => l.devices.includes(d.type))?.y || height/2).strength(0.5))
-        .force("collision", d3.forceCollide(60))
+    simulation.on("tick", () => {
+      nodeGroup.attr("transform", (d) => `translate(${d.fx},${d.fy})`)
 
-      // Create zones
-      LEVELS.forEach(level => {
-        svg.append("rect")
-          .attr("x", 50)
-          .attr("y", level.y)
-          .attr("width", width - 100)
-          .attr("height", 150)
-          .attr("fill", "#fff")
-          .attr("stroke", "#adb5bd")
-          .attr("rx", 8)
-
-        svg.append("text")
-          .attr("x", 70)
-          .attr("y", level.y + 30)
-          .attr("font-size", "16px")
-          .attr("font-weight", "600")
-          .text(level.name)
+      link.attr("d", (d) => {
+        const dx = d.target.fx - d.source.fx
+        const dy = d.target.fy - d.source.fy
+        const dr = Math.sqrt(dx * dx + dy * dy) * 2
+        return `M${d.source.fx},${d.source.fy}A${dr},${dr} 0 0,1 ${d.target.fx},${d.target.fy}`
       })
+    })
 
-      // Render elements
-      simulation.on("tick", () => {
-        renderConnections(svg, processedData.nodes, processedData.nodeMap)
-        renderDevices(svg, processedData)
-      })
+    function wrap(text, width) {
+      text.each(function () {
+        const text = d3.select(this)
+        const words = text.text().split(/\s+/).reverse()
+        let word
+        let line = []
+        let lineNumber = 0
+        const lineHeight = 1.1
+        const y = text.attr("y")
+        const dy = Number.parseFloat(text.attr("dy") || 0)
+        let tspan = text
+          .text(null)
+          .append("tspan")
+          .attr("x", 0)
+          .attr("y", y)
+          .attr("dy", dy + "em")
 
-      return () => simulation.stop()
-    } catch (error) {
-      console.error("Rendering error:", error)
-      toast({
-        title: "Rendering Error",
-        description: "Failed to visualize network",
-        variant: "destructive"
+        while ((word = words.pop())) {
+          line.push(word)
+          tspan.text(line.join(" "))
+          if (tspan.node().getComputedTextLength() > width) {
+            line.pop()
+            tspan.text(line.join(" "))
+            line = [word]
+            tspan = text
+              .append("tspan")
+              .attr("x", 0)
+              .attr("y", y)
+              .attr("dy", ++lineNumber * lineHeight + dy + "em")
+              .text(word)
+          }
+        }
       })
     }
-  }, [data, LEVELS, processDeviceData, renderConnections, renderDevices, toast])
+
+    return () => simulation.stop()
+  }, [data, classifyDevice, getIconForDevice, calculatePosition])
+
+  const handleZoom = (delta) => {
+    const svg = d3.select(svgRef.current)
+    const zoom = d3.zoom()
+    svg.transition().duration(300).call(zoom.scaleBy, delta)
+  }
 
   return (
-    <div className="p-4 bg-white rounded-lg shadow-sm">
-      <svg ref={svgRef} className="w-full" />
-      
-      <Dialog open={!!selectedDevice} onOpenChange={() => setSelectedDevice(null)}>
-        <DialogContent>
+    <div className="relative w-full h-full bg-gradient-to-br from-slate-50 to-white">
+      <div className="absolute top-4 right-4 flex gap-2 z-10">
+        <Button variant="outline" size="icon" onClick={() => handleZoom(1.2)} className="bg-white/80 backdrop-blur-sm">
+          <ZoomIn className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => handleZoom(0.8)} className="bg-white/80 backdrop-blur-sm">
+          <ZoomOut className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="overflow-auto w-full h-full">
+        <svg ref={svgRef} className="w-full h-full" />
+        <div ref={tooltipRef} />
+      </div>
+
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="bg-white/95 backdrop-blur-sm max-w-md border-0 shadow-lg">
           <DialogHeader>
-            <DialogTitle>{selectedDevice?.vendor}</DialogTitle>
+            <DialogTitle className="text-2xl font-bold text-slate-800">
+              {selectedNode?.Vendor || "Unknown Device"}
+            </DialogTitle>
           </DialogHeader>
-          {selectedDevice && (
-            <div className="grid gap-4">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>MAC:</div>
-                <div className="font-mono">{selectedDevice.mac}</div>
-                <div>IP:</div>
-                <div>{selectedDevice.ip}</div>
-                <div>Type:</div>
-                <div>{selectedDevice.type}</div>
-                <div>Status:</div>
-                <div className={selectedDevice.status === "true" ? "text-green-500" : "text-red-500"}>
-                  {selectedDevice.status === "true" ? "Active" : "Inactive"}
+
+          {selectedNode && (
+            <div className="grid gap-6 text-slate-700">
+              <div className="grid gap-4">
+                <div className="font-semibold text-lg border-b pb-2 text-slate-900">Device Details</div>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <DetailItem label="MAC" value={selectedNode.MAC} />
+                  <DetailItem label="IP" value={selectedNode.IP.join(", ")} />
+                  <DetailItem label="Type" value={selectedNode.Type} />
+                  <DetailItem label="Zone" value={selectedNode.zone?.name} />
+                  <DetailItem
+                    label="Status"
+                    value={selectedNode.status === "true" ? "Active" : "Inactive"}
+                    valueClass={cn("font-medium", selectedNode.status === "true" ? "text-emerald-600" : "text-red-600")}
+                  />
                 </div>
               </div>
-              <div className="mt-2">
-                <h3 className="font-semibold mb-1">Protocols</h3>
+
+              <div className="grid gap-4">
+                <div className="font-semibold text-lg border-b pb-2 text-slate-900">Protocols</div>
                 <div className="flex flex-wrap gap-2">
-                  {selectedDevice.protocols?.map((protocol, i) => (
-                    <span key={i} className="px-2 py-1 text-xs rounded-full bg-gray-100">
-                      {protocol}
+                  {selectedNode.Protocol.map((p, i) => (
+                    <span key={i} className="px-3 py-1.5 text-xs rounded-full bg-slate-100 text-slate-700 font-medium">
+                      {p}
                     </span>
                   ))}
                 </div>
@@ -235,4 +456,10 @@ const PurdueHierarchy = ({ data }) => {
   )
 }
 
-export default PurdueHierarchy
+const DetailItem = ({ label, value, valueClass = "" }) => (
+  <>
+    <div className="font-medium text-slate-500">{label}</div>
+    <div className={cn("font-mono tracking-tight", valueClass)}>{value || "Unknown"}</div>
+  </>
+)
+

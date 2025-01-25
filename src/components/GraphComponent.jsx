@@ -29,7 +29,7 @@ const styles = `
     background: rgba(0, 0, 0, 0.9);
     border: 1px solid #666;
     border-radius: 8px;
-    color: white;
+    color: #000000;
     padding: 16px;
     position: fixed;
     max-width: 400px;
@@ -39,7 +39,7 @@ const styles = `
     background: rgba(0, 0, 0, 0.95);
     border: 1px solid #666;
     border-radius: 8px;
-    color: white;
+    color: #585858;
     padding: 12px;
     position: fixed;
     max-width: 300px;
@@ -265,7 +265,7 @@ const GraphComponent = ({ data }) => {
       .select(svgRef.current)
       .attr("width", width)
       .attr("height", height)
-      .style("background-color", "#1a1a1a")
+      .style("background-color", "#afafaf")
 
     svg.selectAll("*").remove()
 
