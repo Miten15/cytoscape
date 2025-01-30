@@ -1,22 +1,78 @@
+"use client"
+
 import React, { useEffect, useRef, useState } from "react"
 import * as d3 from "d3"
 import { CircuitBoard, Laptop, Router, Monitor } from "lucide-react"
 import ReactDOMServer from "react-dom/server"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import {
-  Toast,
-  ToastProps,
-  ToastActionElement,
-  ToastProvider,
-  ToastViewport,
-  ToastTitle,
-  ToastDescription,
-  ToastClose,
-  ToastAction,
-} from "@/components/ui/toast"
 import { useToast } from "@/components/ui/use-toast"
 
+const ICON_SIZE = 26
+const NODE_GAP = 80
+const NODES_PER_ROW = 30
+const FORCE_STRENGTH = -120
+const COLLISION_RADIUS = NODE_GAP / 2 + ICON_SIZE / 2 // Updated collision radius
+
+// Define clusters with improved styling
+const CLUSTERS = {
+  IT: {
+    id: "IT_Cluster",
+    label: "IT Cluster",
+    icon: Laptop,
+    color: "#4287f520",
+    strokeColor: "#0c1930",
+  },
+  Network: {
+    id: "Network_Cluster",
+    label: "Network Cluster",
+    icon: Router,
+    color: "#f5424220",
+    strokeColor: "#2b0808",
+  },
+  OT: {
+    id: "OT_Cluster",
+    label: "OT Cluster",
+    icon: CircuitBoard,
+    color: "#42f54e20",
+    strokeColor: "#020e02",
+  },
+  Unconnected: {
+    id: "Unconnected_Cluster",
+    label: "Public Devices",
+    icon: Monitor,
+    color: "#66666620",
+    strokeColor: "#666666f0",
+  },
+}
+
+// Styles for the graph
 const styles = `
+  .node-tooltip {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    color: #1e293b;
+    padding: 12px;
+    position: fixed;
+    max-width: 300px;
+    z-index: 1000;
+    pointer-events: none;
+    font-size: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+  .link-tooltip {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    color: #1e293b;
+    padding: 12px;
+    position: fixed;
+    max-width: 300px;
+    z-index: 1000;
+    pointer-events: none;
+    font-size: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
   @keyframes blink {
     0% { opacity: 0.4; }
     50% { opacity: 1; }
@@ -25,61 +81,34 @@ const styles = `
   .status-indicator {
     animation: blink 2s infinite;
   }
-  .node-popup {
-    background: rgba(0, 0, 0, 0.9);
-    border: 1px solid #666;
-    border-radius: 8px;
-    color: #000000;
-    padding: 16px;
-    position: fixed;
-    max-width: 400px;
-    z-index: 1000;
-  }
-  .link-tooltip {
-    background: rgba(0, 0, 0, 0.95);
-    border: 1px solid #666;
-    border-radius: 8px;
-    color: #585858;
-    padding: 12px;
-    position: fixed;
-    max-width: 300px;
-    z-index: 1000;
-    pointer-events: none;
-    font-size: 12px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-  }
-  .link-tooltip .connection-details {
-    margin-bottom: 8px;
-    font-weight: bold;
-  }
-  .link-tooltip .connection-item {
-    margin-bottom: 4px;
-  }
-  .link-tooltip .label {
-    color: #9ca3af;
-    margin-right: 4px;
-  }
-  .link-tooltip .protocol {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid #666;
-  }
-  body, html {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-  }
 `
 
-const ICON_SIZE = 26
-const CLUSTER_RADIUS = 200
-const CLUSTER_PADDING = 60
-const GraphComponent = ({ data }) => {
+function calculateInitialPosition(index, total, centerX, centerY, radius) {
+  const nodesPerRing = Math.floor((Math.PI * radius) / NODE_GAP)
+  const ringIndex = Math.floor(index / nodesPerRing)
+  const nodeInRing = index % nodesPerRing
+
+  const ringRadius = (radius * (ringIndex + 1)) / Math.ceil(total / nodesPerRing)
+
+  const goldenRatio = (1 + Math.sqrt(5)) / 2
+  const angle = 2 * Math.PI * goldenRatio * nodeInRing
+
+  return {
+    x: centerX + ringRadius * Math.cos(angle),
+    y: centerY + ringRadius * Math.sin(angle),
+  }
+}
+
+function calculateClusterRadius(nodeCount) {
+  const baseRadius = 400
+  const scaleFactor = Math.sqrt(nodeCount / 30)
+  return Math.max(baseRadius, Math.min(baseRadius * scaleFactor, 1200))
+}
+
+function GraphComponent({ data }) {
   const svgRef = useRef()
   const [selectedNode, setSelectedNode] = useState(null)
   const [showDialog, setShowDialog] = useState(false)
-  const [nodes, setNodes] = useState([])
-  const [links, setLinks] = useState([])
   const { toast } = useToast()
 
   useEffect(() => {
@@ -92,48 +121,89 @@ const GraphComponent = ({ data }) => {
       return
     }
 
-    const macData = data[0].mac_data
-    const newNodes = []
-    const newLinks = []
-    const nodeConnections = new Map()
+    console.log("Processing data:", data[0].mac_data)
 
-    // Define cluster centers
-    const clusters = {
-      IT: {
-        id: "IT_Cluster",
-        label: "IT Cluster",
-        x: window.innerWidth * 0.2,
-        y: window.innerHeight * 0.5,
-        icon: Laptop,
-        color: "#4287f55c",
-      },
-      Network: {
-        id: "Network_Cluster",
-        label: "Network Cluster",
-        x: window.innerWidth * 0.5,
-        y: window.innerHeight * 0.5,
-        icon: Router,
-        color: "#f5424255",
-      },
-      OT: {
-        id: "OT_Cluster",
-        label: "OT Cluster",
-        x: window.innerWidth * 0.8,
-        y: window.innerHeight * 0.5,
-        icon: CircuitBoard,
-        color: "#42f54e50",
-      },
-      Unconnected: {
-        id: "Unconnected_Cluster",
-        label: "Public Devices",
-        x: window.innerWidth * 0.5,
-        y: window.innerHeight * 1.1,
-        icon: Monitor,
-        color: "#666666",
-      },
+    const width = window.innerWidth
+    const height = window.innerHeight
+    const svg = d3.select(svgRef.current).attr("width", width).attr("height", height).style("background-color", "white")
+
+    svg.selectAll("*").remove()
+
+    // Create tooltips
+    const nodeTooltip = d3.select("body").append("div").attr("class", "node-tooltip").style("opacity", 0)
+    const linkTooltip = d3.select("body").append("div").attr("class", "link-tooltip").style("opacity", 0)
+
+    const container = svg.append("g")
+
+    // Initialize zoom with a starting transform to show the entire graph
+    const zoom = d3
+      .zoom()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event) => {
+        container.attr("transform", event.transform)
+      })
+
+    // Calculate initial zoom to fit all clusters
+    const initialScale = 0.2
+    const initialX = width / 2 - (width * initialScale) / 2
+    const initialY = height / 2 - (height * initialScale) / 2
+
+    svg.call(zoom).call(zoom.transform, d3.zoomIdentity.translate(initialX, initialY).scale(initialScale))
+
+    // Process nodes and organize by cluster
+    const nodesByCluster = {
+      IT: [],
+      Network: [],
+      OT: [],
+      Unconnected: [],
     }
 
-    // Function to check if IP is public
+    const nodeMap = new Map()
+    const links = []
+
+    function wrap(text, width) {
+      text.each(function () {
+        const text = d3.select(this)
+        const words = text.text().split(/\s+/).reverse()
+        let word
+        let line = []
+        let lineNumber = 0
+        const lineHeight = 1.1
+        const y = text.attr("y")
+        const dy = Number.parseFloat(text.attr("dy")) || 0
+        let tspan = text
+          .text(null)
+          .append("tspan")
+          .attr("x", 0)
+          .attr("y", y)
+          .attr("dy", dy + "em")
+
+        while ((word = words.pop())) {
+          line.push(word)
+          tspan.text(line.join(" "))
+          if (tspan.node().getComputedTextLength() > width) {
+            line.pop()
+            tspan.text(line.join(" "))
+            line = [word]
+            tspan = text
+              .append("tspan")
+              .attr("x", 0)
+              .attr("y", y)
+              .attr("dy", ++lineNumber * lineHeight + dy + "em")
+              .text(word)
+          }
+        }
+
+        // Center the text vertically based on the number of lines
+        const lines = text.selectAll("tspan")
+        const totalLines = lines.size()
+        lines.attr("y", (d, i) => {
+          return -(totalLines * lineHeight) - ICON_SIZE / 2 - 12 + i * lineHeight // Updated label positioning
+        })
+      })
+    }
+
+    // Helper functions
     const isPublicIP = (ip) => {
       if (ip === "Null" || !ip || typeof ip !== "string") return true
       const parts = ip.split(".")
@@ -157,12 +227,23 @@ const GraphComponent = ({ data }) => {
       let clusterType = "Unconnected"
       let hasPublicIP = false
 
-      // Check the first IP (primary IP) for classification
+      console.log("Device type:", device.type, "Device:", device)
+
+      if (
+        (device.type && typeof device.type === "string" && device.type.toLowerCase() === "network") ||
+        (device.Type && typeof device.Type === "string" && device.Type.toLowerCase() === "network") ||
+        (device.deviceType && typeof device.deviceType === "string" && device.deviceType.toLowerCase() === "network") ||
+        (device.Vendor && typeof device.Vendor === "string" && device.Vendor.toLowerCase().includes("router")) ||
+        (device.Vendor && typeof device.Vendor === "string" && device.Vendor.toLowerCase().includes("switch")) ||
+        (device.Vendor && typeof device.Vendor === "string" && device.Vendor.toLowerCase().includes("gateway"))
+      ) {
+        console.log("Classified as Network:", device)
+        return { clusterType: "Network", hasPublicIP: false }
+      }
+
       const primaryIP = ips[0]
 
-      if (device.Vendor.includes("Cisco Systems") || device.type === "Network") {
-        clusterType = "Network"
-      } else if (
+      if (
         primaryIP.startsWith("172.16.") ||
         primaryIP.startsWith("172.17.") ||
         primaryIP.startsWith("172.18.") ||
@@ -190,7 +271,6 @@ const GraphComponent = ({ data }) => {
         clusterType = "IT"
       }
 
-      // Check for public IPs
       ips.forEach((ip) => {
         if (isPublicIP(ip) && !isDNSResolverIP(ip)) {
           hasPublicIP = true
@@ -209,14 +289,16 @@ const GraphComponent = ({ data }) => {
     }
 
     // Process nodes
-    let hasUnconnectedNodes = false
-    macData.forEach((category) => {
+    data[0].mac_data.forEach((category) => {
+      console.log("Processing category:", category)
       Object.values(category).forEach((devices) => {
+        console.log("Processing devices:", devices)
         devices.forEach((device) => {
+          console.log("Processing device:", device)
           const { clusterType, hasPublicIP } = classifyDevice(device)
-          hasUnconnectedNodes = hasUnconnectedNodes || clusterType === "Unconnected"
+          console.log("Classified as:", clusterType)
 
-          const deviceNode = {
+          const node = {
             id: device.MAC,
             IP: device.IP,
             MAC: device.MAC,
@@ -226,160 +308,142 @@ const GraphComponent = ({ data }) => {
             status: device.status,
             type: clusterType,
             connections: device[device.MAC] || [],
-            cluster: clusters[clusterType],
-            hasPublicIP: hasPublicIP,
-            fx: null,
-            fy: null,
+            hasPublicIP,
           }
-          newNodes.push(deviceNode)
-          nodeConnections.set(device.MAC, deviceNode)
+
+          nodesByCluster[clusterType].push(node)
+          nodeMap.set(device.MAC, node)
         })
       })
     })
 
-    // Add connections
-    newNodes.forEach((node) => {
-      if (Array.isArray(node.connections)) {
-        node.connections.forEach((targetMac) => {
-          if (targetMac !== "00:00:00:00:00:00" && nodeConnections.has(targetMac)) {
-            newLinks.push({
-              source: node.id,
-              target: targetMac,
-              protocol: node.Protocol,
-              sourceNode: node,
-              targetNode: nodeConnections.get(targetMac),
-            })
-          }
-        })
-      }
-    })
-
-    setNodes(newNodes)
-    setLinks(newLinks)
-
-    const width = window.innerWidth
-    const height = window.innerHeight
-
-    // Setup SVG
-    const svg = d3
-      .select(svgRef.current)
-      .attr("width", width)
-      .attr("height", height)
-      .style("background-color", "#afafaf")
-
-    svg.selectAll("*").remove()
-
-    // Create tooltips
-    const nodeTooltip = d3.select("body").append("div").attr("class", "node-popup").style("opacity", 0)
-    const linkTooltip = d3.select("body").append("div").attr("class", "link-tooltip").style("opacity", 0)
-
-    const container = svg.append("g")
-
-    // Add zoom behavior
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.1, 4])
-      .on("zoom", (event) => {
-        container.attr("transform", event.transform)
+    // Create connections
+    Object.values(nodesByCluster)
+      .flat()
+      .forEach((node) => {
+        if (Array.isArray(node.connections)) {
+          node.connections.forEach((targetMac) => {
+            if (targetMac !== "00:00:00:00:00:00" && nodeMap.has(targetMac)) {
+              links.push({
+                source: node.id,
+                target: targetMac,
+                protocol: node.Protocol,
+                sourceNode: node,
+                targetNode: nodeMap.get(targetMac),
+              })
+            }
+          })
+        }
       })
 
-    svg.call(zoom)
-
-    // Create visible clusters
-    const visibleClusters = Object.values(clusters).filter(
-      (cluster) => cluster.id !== "Unconnected_Cluster" || hasUnconnectedNodes,
-    )
+    // Define cluster positions
+    const clusterPositions = {
+      IT: { x: width * -0.9, y: height * 0.5 },
+      Network: { x: width * 0.5, y: height * 0.5 },
+      OT: { x: width * 1.9, y: height * 0.5 },
+      Unconnected: { x: width * 0.5, y: height * 2.9 },
+    }
 
     // Create cluster regions
-    const clusterGroups = container
-      .append("g")
-      .selectAll("g")
-      .data(visibleClusters)
-      .join("g")
-      .attr("transform", (d) => `translate(${d.x},${d.y})`)
+    Object.entries(CLUSTERS).forEach(([type, cluster]) => {
+      const position = clusterPositions[type]
+      const nodeCount = nodesByCluster[type].length
+      const radius = calculateClusterRadius(nodeCount)
+      const nodes = nodesByCluster[type]
 
-    // Add cluster circles
-    clusterGroups
-      .append("circle")
-      .attr("r", CLUSTER_RADIUS)
-      .attr("fill", "none")
-      .attr("stroke", (d) => d.color)
-      .attr("stroke-width", 2)
-      .attr("stroke-dasharray", "5,5")
+      // Draw cluster circle
+      container
+        .append("circle")
+        .attr("cx", position.x)
+        .attr("cy", position.y)
+        .attr("r", radius)
+        .attr("fill", cluster.color)
+        .attr("stroke", cluster.strokeColor)
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "5,5")
 
-    // Add cluster labels
-    clusterGroups
-      .append("text")
-      .attr("text-anchor", "middle")
-      .attr("y", -CLUSTER_RADIUS - 20)
-      .attr("fill", "white")
-      .attr("font-size", "20px")
-      .attr("font-weight", "bold")
-      .text((d) => d.label)
+      // Add cluster label
+      container
+        .append("text")
+        .attr("x", position.x)
+        .attr("y", position.y - radius - 20)
+        .attr("text-anchor", "middle")
+        .attr("fill", "#1e293b")
+        .attr("font-size", "20px")
+        .attr("font-weight", "bold")
+        .text(cluster.label)
 
-    // Improved force simulation
-    const simulation = d3
-      .forceSimulation(newNodes)
-      .force(
-        "link",
-        d3
-          .forceLink(newLinks)
-          .id((d) => d.id)
-          .distance(100),
-      )
-      .force("charge", d3.forceManyBody().strength(-1000))
-      .force("collision", d3.forceCollide(ICON_SIZE * 2))
-      .force("x", d3.forceX(width / 2).strength(0.1))
-      .force("y", d3.forceY(height / 2).strength(0.1))
-      .force("cluster", (alpha) => {
-        newNodes.forEach((node) => {
-          if (node.cluster) {
-            const k = alpha * 1.5 // Increased strength
-            const dx = node.x - node.cluster.x
-            const dy = node.y - node.cluster.y
-            const dist = Math.sqrt(dx * dx + dy * dy)
-
-            if (dist > CLUSTER_RADIUS - CLUSTER_PADDING) {
-              const angle = Math.atan2(dy, dx)
-              node.x = node.cluster.x + (CLUSTER_RADIUS - CLUSTER_PADDING) * Math.cos(angle)
-              node.y = node.cluster.y + (CLUSTER_RADIUS - CLUSTER_PADDING) * Math.sin(angle)
-            }
-          }
-        })
+      // Position nodes within cluster using force-directed layout
+      nodes.forEach((node, index) => {
+        const initialPos = calculateInitialPosition(index, nodes.length, position.x, position.y, radius * 0.8)
+        node.x = initialPos.x
+        node.y = initialPos.y
       })
 
-    // Create links with enhanced tooltips
-    const link = container
+      // Apply force-directed layout to nodes within each cluster
+      const simulation = d3
+        .forceSimulation(nodes)
+        .force("center", d3.forceCenter(position.x, position.y))
+        .force("charge", d3.forceManyBody().strength(FORCE_STRENGTH))
+        .force("collision", d3.forceCollide().radius(COLLISION_RADIUS))
+        .force("x", d3.forceX(position.x).strength(0.1))
+        .force("y", d3.forceY(position.y).strength(0.1))
+        .stop()
+
+      // Run the simulation
+      for (let i = 0; i < 300; i++) simulation.tick()
+
+      // Update node positions after simulation
+      nodes.forEach((node, index) => {
+        node.x = simulation.nodes()[index].x
+        node.y = simulation.nodes()[index].y
+      })
+
+      // Calculate label positions for nodes
+      nodes.forEach((node) => {
+        const dx = node.x - position.x
+        const dy = node.y - position.y
+        const theta = Math.atan2(dy, dx)
+
+        const labelAnchor = "middle"
+        const labelDx = 0
+        const labelDy = ICON_SIZE / 2 + 12 // Increased padding below the icon
+      })
+    })
+
+    // Draw connections
+    container
       .append("g")
       .selectAll("line")
-      .data(newLinks)
+      .data(links)
       .join("line")
-      .attr("stroke", "#666")
-      .attr("stroke-width", 0.2)
+      .attr("stroke", "#64748bab")
+      .attr("stroke-width", 0.4)
+      .attr("x1", (d) => nodeMap.get(d.source).x)
+      .attr("y1", (d) => nodeMap.get(d.source).y)
+      .attr("x2", (d) => nodeMap.get(d.target).x)
+      .attr("y2", (d) => nodeMap.get(d.target).y)
       .on("mouseover", (event, d) => {
-        const content = `
-          <div class="connection-details">Connection Details</div>
-          <div class="connection-item">
-            <span class="label">From:</span> ${d.sourceNode.Vendor} (${d.sourceNode.MAC})
-          </div>
-          <div class="connection-item">
-            <span class="label">To:</span> ${d.targetNode.Vendor} (${d.targetNode.MAC})
-          </div>
-          ${
-            d.protocol
-              ? `
-            <div class="protocol">
-              <span class="label">Protocol:</span> ${Array.isArray(d.protocol) ? d.protocol.join(", ") : d.protocol}
-            </div>
-          `
-              : ""
-          }
-        `
         linkTooltip
-          .html(content)
+          .style("opacity", 1)
+          .html(`
+            <div class="space-y-2">
+              <div class="font-semibold">Connection Details</div>
+              <div class="text-slate-600">From: ${d.sourceNode.Vendor} (${d.sourceNode.MAC})</div>
+              <div class="text-slate-600">To: ${d.targetNode.Vendor} (${d.targetNode.MAC})</div>
+              ${
+                d.protocol
+                  ? `
+                <div class="mt-2 pt-2 border-t border-slate-200">
+                  <div class="text-slate-600">Protocol: ${Array.isArray(d.protocol) ? d.protocol.join(", ") : d.protocol}</div>
+                </div>
+              `
+                  : ""
+              }
+            </div>
+          `)
           .style("left", `${event.pageX + 15}px`)
           .style("top", `${event.pageY}px`)
-          .style("opacity", 1)
       })
       .on("mousemove", (event) => {
         linkTooltip.style("left", `${event.pageX + 15}px`).style("top", `${event.pageY}px`)
@@ -389,39 +453,51 @@ const GraphComponent = ({ data }) => {
       })
 
     // Create nodes
-    const node = container
+    const nodeGroups = container
       .append("g")
       .selectAll("g")
-      .data(newNodes)
+      .data(Object.values(nodesByCluster).flat())
       .join("g")
+      .attr("transform", (d) => `translate(${d.x},${d.y})`)
       .attr("cursor", "pointer")
       .on("click", (event, d) => {
         setSelectedNode(d)
         setShowDialog(true)
       })
       .on("mouseover", (event, d) => {
-        const content = `
-          <div>
-            <strong>${d.Vendor}</strong><br>
-            MAC: ${d.MAC}<br>
-            IP: ${Array.isArray(d.IP) ? d.IP.join(", ") : d.IP}<br>
-            Status: ${d.status === "true" ? "Active" : "Inactive"}
-            ${d.hasPublicIP ? '<br><strong style="color: #ff6b6b;">Has Public IP</strong>' : ""}
-          </div>
-        `
         nodeTooltip
-          .html(content)
+          .style("opacity", 1)
+          .html(`
+            <div class="space-y-2">
+              <div class="font-semibold">${d.Vendor}</div>
+              <div class="text-slate-600">MAC: ${d.MAC}</div>
+              <div class="text-slate-600">IP: ${Array.isArray(d.IP) ? d.IP.join(", ") : d.IP}</div>
+              <div class="flex items-center gap-2">
+                <span class="text-slate-600">Status:</span>
+                <span class="${d.status === "true" ? "text-emerald-600" : "text-red-600"}">
+                  ${d.status === "true" ? "Active" : "Inactive"}
+                </span>
+              </div>
+              ${d.hasPublicIP ? '<div class="text-red-500 font-medium mt-2">Has Public IP</div>' : ""}
+            </div>
+          `)
           .style("left", `${event.pageX + 15}px`)
           .style("top", `${event.pageY}px`)
-          .style("opacity", 1)
+      })
+      .on("mousemove", (event) => {
+        nodeTooltip.style("left", `${event.pageX + 15}px`).style("top", `${event.pageY}px`)
       })
       .on("mouseout", () => {
         nodeTooltip.style("opacity", 0)
       })
 
     // Add icons to nodes
-    node.each(function (d) {
-      const IconComponent = getIconForDevice(d.type)
+    nodeGroups.each(function (d) {
+      const Icon = CLUSTERS[d.type].icon
+      const iconHTML = ReactDOMServer.renderToStaticMarkup(
+        <Icon width={ICON_SIZE} height={ICON_SIZE} className="text-slate-700" strokeWidth={1.5} />,
+      )
+
       const foreignObject = d3
         .select(this)
         .append("foreignObject")
@@ -430,122 +506,101 @@ const GraphComponent = ({ data }) => {
         .attr("x", -ICON_SIZE / 2)
         .attr("y", -ICON_SIZE / 2)
 
-      const div = foreignObject
+      foreignObject
         .append("xhtml:div")
         .style("width", "100%")
         .style("height", "100%")
         .style("display", "flex")
         .style("align-items", "center")
         .style("justify-content", "center")
-
-      const icon = document.createElement("div")
-      icon.innerHTML = ReactDOMServer.renderToStaticMarkup(
-        <IconComponent width={ICON_SIZE} height={ICON_SIZE} stroke="white" strokeWidth={1.5} />,
-      )
-      div.node().appendChild(icon.firstChild)
+        .html(iconHTML)
     })
 
     // Add status indicators
-    node
+    nodeGroups
       .append("circle")
       .attr("class", "status-indicator")
       .attr("r", 4)
       .attr("cx", 0)
       .attr("cy", ICON_SIZE / 2 + 4)
-      .attr("fill", (d) => (d.status === "true" ? "#00ff00" : "#ff0000"))
+      .attr("fill", (d) => (d.status === "true" ? "#22c55e" : "#ef4444"))
 
     // Add labels
-    node
+    nodeGroups
       .append("text")
-      .attr("text-anchor", "middle")
-      .attr("y", -ICON_SIZE / 2 - 8)
-      .attr("fill", "white")
-      .attr("font-size", "14px")
       .text((d) => d.Vendor)
-
-    // Update positions on simulation tick
-    simulation.on("tick", () => {
-      link
-        .attr("x1", (d) => d.source.x)
-        .attr("y1", (d) => d.source.y)
-        .attr("x2", (d) => d.target.x)
-        .attr("y2", (d) => d.target.y)
-
-      node.attr("transform", (d) => `translate(${d.x},${d.y})`)
-    })
+      .attr("text-anchor", "middle")
+      .attr("x", 0)
+      .attr("y", -ICON_SIZE / 2 - 12) // Updated label Y position
+      .style("font-size", "10px")
+      .style("font-weight", "500")
+      .attr("fill", "#1e293b")
+      .style("pointer-events", "none")
+      .call(wrap, NODE_GAP - 10)
 
     return () => {
-      simulation.stop()
       nodeTooltip.remove()
       linkTooltip.remove()
       document.head.removeChild(styleSheet)
     }
   }, [data, toast])
 
-  function getIconForDevice(type) {
-    const icons = {
-      IT: Laptop,
-      OT: CircuitBoard,
-      Network: Router,
-      Unconnected: Monitor,
-    }
-    return icons[type] || Monitor
-  }
-
   return (
-    <div className="relative w-full h-full" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
+    <div className="relative w-full h-full bg-white" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
       <svg ref={svgRef} className="w-full h-full"></svg>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent>
+        <DialogContent className="bg-white max-w-md">
           <DialogHeader>
-            <DialogTitle>{selectedNode?.Vendor}</DialogTitle>
+            <DialogTitle className="text-xl font-semibold text-slate-900">{selectedNode?.Vendor}</DialogTitle>
           </DialogHeader>
           {selectedNode && (
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <div className="font-medium">Device Information</div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="text-muted-foreground">MAC Address:</div>
-                  <div>{selectedNode.MAC}</div>
-                  <div className="text-muted-foreground">IP Address:</div>
-                  <div>{Array.isArray(selectedNode.IP) ? selectedNode.IP.join(", ") : selectedNode.IP}</div>
-                  <div className="text-muted-foreground">Type:</div>
-                  <div>{selectedNode.type}</div>
-                  <div className="text-muted-foreground">Status:</div>
-                  <div>{selectedNode.status === "true" ? "Active" : "Inactive"}</div>
+            <div className="grid gap-6">
+              <div className="grid gap-4">
+                <div className="font-medium text-base text-slate-900">Device Information</div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <DetailItem label="MAC Address" value={selectedNode.MAC} />
+                  <DetailItem
+                    label="IP Address"
+                    value={Array.isArray(selectedNode.IP) ? selectedNode.IP.join(", ") : selectedNode.IP}
+                  />
+                  <DetailItem label="Type" value={selectedNode.type} />
+                  <DetailItem
+                    label="Status"
+                    value={selectedNode.status === "true" ? "Active" : "Inactive"}
+                    valueClass={selectedNode.status === "true" ? "text-emerald-600" : "text-red-600"}
+                  />
                   {selectedNode.hasPublicIP && (
-                    <>
-                      <div className="text-muted-foreground">Public IP:</div>
-                      <div className="text-red-500">Yes</div>
-                    </>
+                    <DetailItem label="Public IP" value="Yes" valueClass="text-red-500 font-medium" />
                   )}
                 </div>
               </div>
 
               {selectedNode.connections?.length > 0 && (
-                <div className="grid gap-2">
-                  <div className="font-medium">Connected Devices</div>
-                  <div className="text-sm max-h-40 overflow-y-auto">
-                    {selectedNode.connections.map((mac, index) => {
-                      const connectedNode = nodes.find((node) => node.MAC === mac)
-                      return (
-                        <div key={index} className="flex items-center gap-2 py-1">
-                          <div className="w-2 h-2 rounded-full bg-primary"></div>
-                          <div>{connectedNode ? `${connectedNode.Vendor} (${mac})` : mac}</div>
-                        </div>
-                      )
-                    })}
+                <div className="grid gap-4">
+                  <div className="font-medium text-base text-slate-900">Connected Devices</div>
+                  <div className="text-sm max-h-40 overflow-y-auto space-y-2">
+                    {selectedNode.connections.map((mac, index) => (
+                      <div key={index} className="flex items-center gap-2 py-1 text-slate-600">
+                        <div className="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
+                        <span className="font-mono">{mac}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
               {selectedNode.Protocol?.length > 0 && (
-                <div className="grid gap-2">
-                  <div className="font-medium">Communication Protocols</div>
-                  <div className="text-sm">
+                <div className="grid gap-4">
+                  <div className="font-medium text-base text-slate-900">Communication Protocols</div>
+                  <div className="flex flex-wrap gap-2">
                     {selectedNode.Protocol.map((protocol, index) => (
-                      <div key={index}>{protocol}</div>
+                      <span
+                        key={index}
+                        className="px-2.5 py-1 text-xs rounded-full bg-slate-100 text-slate-700 font-medium"
+                      >
+                        {protocol}
+                      </span>
                     ))}
                   </div>
                 </div>
@@ -558,5 +613,14 @@ const GraphComponent = ({ data }) => {
   )
 }
 
+const DetailItem = ({ label, value, valueClass = "" }) => (
+  <div className="grid gap-1">
+    <div className="text-slate-500 font-medium">{label}</div>
+    <div className={`font-mono text-slate-900 ${valueClass}`}>{value || "Unknown"}</div>
+  </div>
+)
+
 export default GraphComponent
+
+
 

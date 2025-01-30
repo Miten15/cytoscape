@@ -17,64 +17,69 @@ import {
 } from "lucide-react"
 import ReactDOMServer from "react-dom/server"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const ICON_SIZE = 40
 const ZONE_PADDING = 60
-const ZONE_WIDTH = 1600
-const ZONE_HEIGHT = 220
+const ZONE_WIDTH = 3600
 const LEVEL_GAP = 40
-const NODES_PER_LINE = 12
-const NODE_GAP = 120
+const NODES_PER_LINE = 20
+const NODE_GAP = 169
 
 const ZONE_DEFINITIONS = [
   {
-    name: "OT Devices (Level 1)",
-    level: 1,
-    y: ZONE_HEIGHT * 2 + LEVEL_GAP * 2,
-    color: "from-emerald-50 to-emerald-100/80",
-    borderColor: "border-emerald-200",
-    height: ZONE_HEIGHT * 1.5, // Increased height for OT zone
+    name: "IT Devices (Level 3)",
+    level: 3,
+    color: "from-blue-50 to-blue-100/80",
+    borderColor: "border-blue-200",
   },
   {
     name: "Network Devices (Level 2)",
     level: 2,
-    y: ZONE_HEIGHT + LEVEL_GAP,
     color: "from-amber-50 to-amber-100/80",
     borderColor: "border-amber-200",
-    height: ZONE_HEIGHT,
   },
   {
-    name: "IT Devices (Level 3)",
-    level: 3,
-    y: 0,
-    color: "from-blue-50 to-blue-100/80",
-    borderColor: "border-blue-200",
-    height: ZONE_HEIGHT,
+    name: "OT Devices (Level 1)",
+    level: 1,
+    color: "from-emerald-50 to-emerald-100/80",
+    borderColor: "border-emerald-200",
   },
 ]
 
-export default function PurdueGraph({ data, mode }) {
+const PurdueGraph = ({ data, mode }) => {
   const svgRef = useRef(null)
   const tooltipRef = useRef(null)
+  const linkTooltipRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [showDialog, setShowDialog] = useState(false)
 
   const classifyDevice = useCallback((device) => {
     const ips = Array.isArray(device.IP) ? device.IP : [device.IP || ""]
 
-    if (device.Vendor?.includes("Cisco") || device.Type === "Network") {
-      return ZONE_DEFINITIONS.find((z) => z.level === 2)
-    }
+    // Network devices check
+    const isNetworkDevice =
+      device.Vendor?.toLowerCase().includes("cisco") ||
+      device.Type?.toLowerCase() === "network" ||
+      device.Type?.toLowerCase().includes("router") ||
+      device.Type?.toLowerCase().includes("switch") ||
+      device.Type?.toLowerCase().includes("firewall") ||
+      device.Type?.toLowerCase().includes("gateway") ||
+      (device.Vendor &&
+        ["juniper", "palo alto", "fortinet", "huawei", "arista"].some((vendor) =>
+          device.Vendor.toLowerCase().includes(vendor),
+        ))
 
-    if (
+    if (isNetworkDevice) return ZONE_DEFINITIONS.find((z) => z.level === 2)
+
+    // OT devices check
+    const isOTDevice =
       ips.some((ip) => ip?.startsWith("172.")) ||
-      ["PLC", "RTU", "Sensor", "Actuator"].some((type) => device.Type?.includes(type))
-    ) {
-      return ZONE_DEFINITIONS.find((z) => z.level === 1)
-    }
+      ["PLC", "RTU", "Sensor", "Actuator"].some((type) => device.Type?.toLowerCase().includes(type.toLowerCase()))
 
+    if (isOTDevice) return ZONE_DEFINITIONS.find((z) => z.level === 1)
+
+    // Default to IT
     return ZONE_DEFINITIONS.find((z) => z.level === 3)
   }, [])
 
@@ -89,7 +94,7 @@ export default function PurdueGraph({ data, mode }) {
     return device.Type?.includes("Workstation") ? Laptop : Server
   }, [])
 
-  const calculatePosition = useCallback((index, zoneY, totalNodes) => {
+  const calculatePosition = useCallback((index, zoneY, totalNodes, zoneHeight) => {
     const rows = Math.ceil(totalNodes / NODES_PER_LINE)
     const lastRowNodes = totalNodes % NODES_PER_LINE || NODES_PER_LINE
     const isLastRow = Math.floor(index / NODES_PER_LINE) === rows - 1
@@ -97,12 +102,17 @@ export default function PurdueGraph({ data, mode }) {
 
     const row = Math.floor(index / NODES_PER_LINE)
     const col = index % NODES_PER_LINE
-
-    // Calculate offset to center nodes in the row
     const rowOffset = ((NODES_PER_LINE - nodesInThisRow) * NODE_GAP) / 2
 
     const x = ZONE_PADDING + col * NODE_GAP + NODE_GAP / 2 + rowOffset
-    const y = zoneY + ZONE_PADDING + row * NODE_GAP + NODE_GAP / 2
+    const verticalSpace = zoneHeight - ZONE_PADDING * 2
+    const y =
+      zoneY +
+      ZONE_PADDING +
+      (rows === 1
+        ? verticalSpace / 2 // Center vertically for single row
+        : (row * verticalSpace) / (rows - 1))
+
     return { x, y }
   }, [])
 
@@ -110,86 +120,12 @@ export default function PurdueGraph({ data, mode }) {
     if (!svgRef.current || !data?.[0]?.mac_data) return
 
     const width = ZONE_WIDTH
-    const height = ZONE_HEIGHT * 3 + LEVEL_GAP * 2
-
-    const svg = d3.select(svgRef.current).attr("width", width).attr("height", height).style("background-color", "white")
-
-    svg.selectAll("*").remove()
-
-    // Create tooltip
-    const tooltip = d3
-      .select(tooltipRef.current)
-      .style("position", "absolute")
-      .style("visibility", "hidden")
-      .style("background-color", "rgba(255, 255, 255, 0.95)")
-      .style("border", "1px solid #e2e8f0")
-      .style("border-radius", "8px")
-      .style("padding", "12px")
-      .style("box-shadow", "0 4px 6px -1px rgba(0, 0, 0, 0.1)")
-      .style("font-size", "12px")
-      .style("z-index", "50")
-
-    // Create zoom behavior
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.5, 2])
-      .on("zoom", (event) => {
-        container.attr("transform", event.transform)
-      })
-
-    svg.call(zoom)
-
-    const container = svg.append("g")
-
-    // Draw zones
-    ZONE_DEFINITIONS.forEach((zone) => {
-      const gradientId = `zone-gradient-${zone.level}`
-      const gradient = container
-        .append("defs")
-        .append("linearGradient")
-        .attr("id", gradientId)
-        .attr("x1", "0%")
-        .attr("y1", "0%")
-        .attr("x2", "100%")
-        .attr("y2", "0%")
-
-      gradient
-        .append("stop")
-        .attr("offset", "0%")
-        .attr("stop-color", zone.level === 1 ? "#10B98160" : zone.level === 2 ? "#F59E0B60" : "#3B82F630")
-
-      gradient
-        .append("stop")
-        .attr("offset", "100%")
-        .attr("stop-color", zone.level === 1 ? "#10B98130" : zone.level === 2 ? "#F59E0B30" : "#3B82F630")
-
-      container
-        .append("rect")
-        .attr("x", ZONE_PADDING)
-        .attr("y", zone.y)
-        .attr("width", width - ZONE_PADDING * 2)
-        .attr("height", zone.height || ZONE_HEIGHT) // Use custom height if specified
-        .attr("fill", `url(#${gradientId})`)
-        .attr("rx", 16)
-        .attr("filter", "drop-shadow(0 4px 6px rgb(0 0 0 / 0.05))")
-        .attr("stroke", zone.level === 1 ? "#10B98140" : zone.level === 2 ? "#F59E0B40" : "#3B82F640")
-        .attr("stroke-width", 2)
-
-      container
-        .append("text")
-        .attr("x", ZONE_PADDING + 20)
-        .attr("y", zone.y + 30)
-        .style("font-size", "16px")
-        .style("font-weight", "600")
-        .attr("fill", "#1a2b4b")
-        .text(zone.name)
-    })
+    const nodesByZone = new Map(ZONE_DEFINITIONS.map((zone) => [zone.level, []]))
 
     // Process nodes
     const nodes = []
     const links = []
     const nodeMap = new Map()
-    const nodesByZone = new Map(ZONE_DEFINITIONS.map((zone) => [zone.level, []]))
 
     data[0].mac_data.forEach((category) => {
       Object.values(category).forEach((devices) => {
@@ -217,15 +153,120 @@ export default function PurdueGraph({ data, mode }) {
       })
     })
 
-    // Position nodes
-    nodesByZone.forEach((zoneNodes, level) => {
-      const zone = ZONE_DEFINITIONS.find((z) => z.level === level)
+    // Calculate zone heights based on the number of nodes
+    const zoneHeights = ZONE_DEFINITIONS.map((zone) => {
+      const nodesInZone = nodesByZone.get(zone.level).length
+      const rows = Math.ceil(nodesInZone / NODES_PER_LINE)
+      return Math.max(rows * NODE_GAP + ZONE_PADDING * 2, 220)
+    })
 
-      zoneNodes.forEach((node, index) => {
-        const position = calculatePosition(index, zone.y, zoneNodes.length)
+    const totalHeight = zoneHeights.reduce((sum, height) => sum + height, 0) + LEVEL_GAP * (ZONE_DEFINITIONS.length - 1)
+
+    const svg = d3
+      .select(svgRef.current)
+      .attr("width", width)
+      .attr("height", totalHeight)
+      .style("background-color", "white")
+
+    svg.selectAll("*").remove()
+
+    // Create tooltip
+    const tooltip = d3
+      .select(tooltipRef.current)
+      .style("position", "absolute")
+      .style("visibility", "hidden")
+      .style("background", "white")
+      .style("border", "1px solid #ddd")
+      .style("padding", "10px")
+      .style("border-radius", "5px")
+      .style("z-index", "10")
+
+    // Update: Initialize linkTooltip with blinking effect
+    const linkTooltip = d3
+      .select(linkTooltipRef.current)
+      .style("position", "absolute")
+      .style("visibility", "hidden")
+      .style("background-color", "white")
+      .style("border", "1px solid #ddd")
+      .style("border-radius", "5px")
+      .style("padding", "10px")
+      .style("z-index", "10")
+      .style("pointer-events", "none")
+      .classed("blinking", true)
+
+    // Create zoom behavior
+    const zoom = d3
+      .zoom()
+      .scaleExtent([0.1, 4])
+      .on("zoom", (event) => {
+        container.attr("transform", event.transform)
+      })
+
+    svg.call(zoom)
+
+    const container = svg.append("g")
+
+    // Set initial zoom to fit the entire graph
+    const initialScale = Math.min(svg.attr("width") / width, svg.attr("height") / totalHeight) * 0.9
+    const initialTransform = d3.zoomIdentity
+      .translate((svg.attr("width") - width * initialScale) / 2, (svg.attr("height") - totalHeight * initialScale) / 2)
+      .scale(initialScale)
+    svg.call(zoom.transform, initialTransform)
+
+    // Draw zones
+    let currentY = 0
+    ZONE_DEFINITIONS.forEach((zone, index) => {
+      const zoneHeight = zoneHeights[index]
+      const gradientId = `zone-gradient-${zone.level}`
+      const gradient = container
+        .append("defs")
+        .append("linearGradient")
+        .attr("id", gradientId)
+        .attr("x1", "0%")
+        .attr("y1", "0%")
+        .attr("x2", "100%")
+        .attr("y2", "0%")
+
+      gradient
+        .append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", zone.level === 1 ? "#10b98114" : zone.level === 2 ? "#f59f0b18" : "#3b83f614")
+
+      gradient
+        .append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", zone.level === 1 ? "#10b98114" : zone.level === 2 ? "#f59f0b18" : "#3b83f614")
+
+      container
+        .append("rect")
+        .attr("x", ZONE_PADDING)
+        .attr("y", currentY)
+        .attr("width", width - ZONE_PADDING * 2)
+        .attr("height", zoneHeight)
+        .attr("fill", `url(#${gradientId})`)
+        .attr("rx", 16)
+        .attr("filter", "drop-shadow(0 4px 6px rgb(0 0 0 / 0.05))")
+        .attr("stroke", zone.level === 1 ? "#10b98114" : zone.level === 2 ? "#f59f0b18" : "#3b83f614")
+        .attr("stroke-width", 2)
+
+      container
+        .append("text")
+        .attr("x", ZONE_PADDING + 20)
+        .attr("y", currentY + 30)
+        .style("font-size", "16px")
+        .style("font-weight", "600")
+        .attr("fill", "#1a2b4b")
+        .text(zone.name)
+
+      // Position nodes within the zone
+      const zoneNodes = nodesByZone.get(zone.level)
+      zoneNodes.forEach((node, nodeIndex) => {
+        const position = calculatePosition(nodeIndex, currentY, zoneNodes.length, zoneHeight)
         node.fx = position.x
         node.fy = position.y
       })
+
+      currentY += zoneHeight + LEVEL_GAP
     })
 
     // Create connections
@@ -241,17 +282,45 @@ export default function PurdueGraph({ data, mode }) {
       })
     })
 
-    // Draw connections
+    // Update: Draw connections using paths instead of lines
     const link = container
       .append("g")
       .selectAll("path")
       .data(links)
       .join("path")
-      .attr("class", "connection-line")
-      .attr("stroke", "#64748b30")
-      .attr("stroke-width", 1.5)
-      .attr("stroke-dasharray", "4,4")
+      .attr("class", "connection-path")
+      .attr("stroke", "#64748bab")
+      .attr("stroke-width", 1)
       .attr("fill", "none")
+      .style("pointer-events", "visibleStroke")
+      .on("mouseover", (event, d) => {
+        const sourceNode = nodeMap.get(d.source)
+        const targetNode = nodeMap.get(d.target)
+        linkTooltip
+          .style("visibility", "visible")
+          .html(`
+        <div class="space-y-2">
+          <div class="font-semibold">Connection Details</div>
+          <div class="text-slate-600">From: ${sourceNode?.Vendor || "Unknown"} (${d.source})</div>
+          <div class="text-slate-600">To: ${targetNode?.Vendor || "Unknown"} (${d.target})</div>
+          ${
+            d.protocol
+              ? `<div class="mt-2 pt-2 border-t border-slate-200">
+                  <div class="text-slate-600">Protocol: ${Array.isArray(d.protocol) ? d.protocol.join(", ") : d.protocol}</div>
+                 </div>`
+              : ""
+          }
+        </div>
+      `)
+          .style("left", `${event.pageX + 15}px`)
+          .style("top", `${event.pageY}px`)
+      })
+      .on("mousemove", (event) => {
+        linkTooltip.style("left", `${event.pageX + 15}px`).style("top", `${event.pageY}px`)
+      })
+      .on("mouseout", () => {
+        linkTooltip.style("visibility", "hidden")
+      })
 
     // Create node groups
     const nodeGroup = container
@@ -342,14 +411,20 @@ export default function PurdueGraph({ data, mode }) {
       .force("charge", d3.forceManyBody().strength(-50))
       .force("collision", d3.forceCollide(ICON_SIZE))
 
+    // Update: Simulation tick function for line positioning
     simulation.on("tick", () => {
       nodeGroup.attr("transform", (d) => `translate(${d.fx},${d.fy})`)
 
       link.attr("d", (d) => {
-        const dx = d.target.fx - d.source.fx
-        const dy = d.target.fy - d.source.fy
-        const dr = Math.sqrt(dx * dx + dy * dy) * 2
-        return `M${d.source.fx},${d.source.fy}A${dr},${dr} 0 0,1 ${d.target.fx},${d.target.fy}`
+        const sourceX = d.source.fx
+        const sourceY = d.source.fy
+        const targetX = d.target.fx
+        const targetY = d.target.fy
+        const midX = (sourceX + targetX) / 2
+        const midY = (sourceY + targetY) / 2
+
+        return `M ${sourceX},${sourceY}
+            Q ${midX},${midY} ${targetX},${targetY}`
       })
     })
 
@@ -388,7 +463,10 @@ export default function PurdueGraph({ data, mode }) {
       })
     }
 
-    return () => simulation.stop()
+    return () => {
+      simulation.stop()
+      linkTooltip.remove()
+    }
   }, [data, classifyDevice, getIconForDevice, calculatePosition])
 
   const handleZoom = (delta) => {
@@ -399,18 +477,25 @@ export default function PurdueGraph({ data, mode }) {
 
   return (
     <div className="relative w-full h-full bg-gradient-to-br from-slate-50 to-white">
-      <div className="absolute top-4 right-4 flex gap-2 z-10">
-        <Button variant="outline" size="icon" onClick={() => handleZoom(1.2)} className="bg-white/80 backdrop-blur-sm">
-          <ZoomIn className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="icon" onClick={() => handleZoom(0.8)} className="bg-white/80 backdrop-blur-sm">
-          <ZoomOut className="h-4 w-4" />
-        </Button>
-      </div>
-
       <div className="overflow-auto w-full h-full">
         <svg ref={svgRef} className="w-full h-full" />
         <div ref={tooltipRef} />
+        <div ref={linkTooltipRef} />
+      </div>
+
+      <div className="absolute bottom-4 right-4 flex space-x-2">
+        <button
+          onClick={() => handleZoom(1.2)}
+          className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 transition-colors"
+        >
+          <ZoomIn size={24} />
+        </button>
+        <button
+          onClick={() => handleZoom(0.8)}
+          className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 transition-colors"
+        >
+          <ZoomOut size={24} />
+        </button>
       </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
@@ -448,6 +533,24 @@ export default function PurdueGraph({ data, mode }) {
                   ))}
                 </div>
               </div>
+
+              <div className="grid gap-4">
+                <div className="font-semibold text-lg border-b pb-2 text-slate-900">Connected Devices</div>
+                <div className="max-h-48 overflow-y-auto">
+                  {selectedNode.connections.map((connectedMAC, index) => {
+                    const connectedDevice = data[0].mac_data
+                      .flatMap((category) => Object.values(category).flat())
+                      .find((device) => device.MAC === connectedMAC)
+                    return (
+                      <div key={index} className="mb-2 p-2 bg-slate-50 rounded-md">
+                        <p className="font-medium">{connectedDevice?.Vendor || "Unknown Device"}</p>
+                        <p className="text-xs text-slate-500">MAC: {connectedMAC}</p>
+                        <p className="text-xs text-slate-500">Type: {connectedDevice?.Type || "Unknown"}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>
@@ -462,4 +565,6 @@ const DetailItem = ({ label, value, valueClass = "" }) => (
     <div className={cn("font-mono tracking-tight", valueClass)}>{value || "Unknown"}</div>
   </>
 )
+
+export default PurdueGraph
 
